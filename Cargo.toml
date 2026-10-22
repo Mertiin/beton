@@ -1,0 +1,13 @@
+[package]
+name = "brutal-pixels"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.88"
+description = "Open a window and draw one image from disk."
+
+[dependencies]
+winit = "0.30"
+wgpu = "30"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
