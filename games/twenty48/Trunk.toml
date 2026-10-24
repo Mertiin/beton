@@ -1,0 +1,6 @@
+[build]
+target = "index.html"
+dist = "../../target/twenty48-web"
+
+[watch]
+ignore = ["../../target"]

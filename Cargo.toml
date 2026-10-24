@@ -1,13 +1,24 @@
-[package]
-name = "brutal-pixels"
-version = "0.1.0"
+[workspace]
+members = ["crates/*", "games/*"]
+resolver = "2"
+
+[workspace.package]
 edition = "2021"
 rust-version = "1.88"
-description = "Open a window and draw one image from disk."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Mertiin/beton"
 
-[dependencies]
+[workspace.dependencies]
 winit = "0.30"
 wgpu = "30"
-image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
+image = { version = "0.25", default-features = false }
 pollster = "0.4"
 bytemuck = { version = "1", features = ["derive"] }
+rodio = { version = "0.22", default-features = false, features = ["playback"] }
+web-time = "1"
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = "0.3"
+console_error_panic_hook = "0.1"
+beton = { path = "crates/beton" }

@@ -1,13 +1,19 @@
-//! Flappy Bird sample on the brutal-gfx API.
+//! Flappy Bird sample on the beton API.
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use brutal_gfx::{
+use beton::{
     run, Animation, Camera, Config, Context, Font, Game, GameObject, GameObjectId, Key, Projection,
-    Rng, Scene, SoundId, Sprite, SpriteSheet, TextureId, Vec3, World,
+    Rng, Scene, SoundHandle, Sprite, SpriteSheet, TextureHandle, TextureId, Vec3, World,
 };
+
+const ASSETS: &[&str] = &[
+    "assets/bird-sheet.png",
+    "assets/pipe.png",
+    "assets/bgm.ogg",
+];
 
 const SFX_VOL: f32 = 0.4;
 const BGM_VOL: f32 = 0.22;
@@ -50,13 +56,17 @@ enum State {
 
 struct Flappy {
     state: State,
-    white: Option<TextureId>,
+    /// Pins keep boot textures resident for the whole session.
+    white: Option<TextureHandle>,
+    font_tex: Option<TextureHandle>,
+    bird_tex: Option<TextureHandle>,
+    pipe: Option<TextureHandle>,
     font: Option<Font>,
     bird_anim: Option<Animation>,
-    pipe: Option<TextureId>,
-    flap_sfx: Option<SoundId>,
-    score_sfx: Option<SoundId>,
-    hit_sfx: Option<SoundId>,
+    flap_sfx: Option<SoundHandle>,
+    score_sfx: Option<SoundHandle>,
+    hit_sfx: Option<SoundHandle>,
+    bgm: Option<SoundHandle>,
     bird: Option<GameObjectId>,
     bird_vy: f32,
     bird_angle: f32,
@@ -70,12 +80,15 @@ impl Flappy {
         Self {
             state: State::Ready,
             white: None,
+            font_tex: None,
+            bird_tex: None,
+            pipe: None,
             font: None,
             bird_anim: None,
-            pipe: None,
             flap_sfx: None,
             score_sfx: None,
             hit_sfx: None,
+            bgm: None,
             bird: None,
             bird_vy: 0.0,
             bird_angle: 0.0,
@@ -83,10 +96,6 @@ impl Flappy {
             next_pipe_at: 0.0,
             score: 0,
         }
-    }
-
-    fn asset(name: &str) -> PathBuf {
-        assets_dir(&std::env::current_exe().expect("current executable")).join(name)
     }
 
     fn reset(&mut self, world: &mut World) {
@@ -106,8 +115,8 @@ impl Flappy {
         self.state = State::Playing;
         self.next_pipe_at = ctx.time + PIPE_INTERVAL * 0.5;
         self.bird_vy = FLAP;
-        if let Some(sfx) = self.flap_sfx {
-            ctx.audio.play(sfx, SFX_VOL);
+        if let Some(sfx) = self.flap_sfx.as_ref() {
+            ctx.audio.play(sfx.id(), SFX_VOL);
         }
     }
 
@@ -148,6 +157,10 @@ fn bird_tilt(vy: f32) -> f32 {
 }
 
 impl Game for Flappy {
+    fn assets(&self) -> &[&'static str] {
+        ASSETS
+    }
+
     fn boot(&mut self, ctx: &mut Context) {
         let white = ctx
             .gfx
@@ -161,14 +174,17 @@ impl Game for Flappy {
 
         let bird_tex = ctx
             .gfx
-            .load_texture(&Self::asset("bird-sheet.png"))
+            .load_texture(Path::new("assets/bird-sheet.png"))
             .expect("bird-sheet");
         let pipe = ctx
             .gfx
-            .load_texture(&Self::asset("pipe.png"))
+            .load_texture(Path::new("assets/pipe.png"))
             .expect("pipe");
 
-        self.white = Some(white);
+        self.white = Some(ctx.gfx.pin(white).expect("pin white"));
+        self.font_tex = Some(ctx.gfx.pin(font_tex).expect("pin font"));
+        self.bird_tex = Some(ctx.gfx.pin(bird_tex).expect("pin bird"));
+        self.pipe = Some(ctx.gfx.pin(pipe).expect("pin pipe"));
         self.font = Some(Font {
             texture: font_tex,
             columns: 10,
@@ -185,26 +201,26 @@ impl Game for Flappy {
             [0, 1, 2, 1],
             FLAP_FPS,
         ));
-        self.pipe = Some(pipe);
-        self.flap_sfx = Some(
-            ctx.audio
-                .create(&tone_wav(620.0, 0.07, 0.55))
-                .expect("flap sfx"),
-        );
-        self.score_sfx = Some(
-            ctx.audio
-                .create(&tone_wav(980.0, 0.09, 0.45))
-                .expect("score sfx"),
-        );
-        self.hit_sfx = Some(
-            ctx.audio
-                .create(&tone_wav(140.0, 0.22, 0.7))
-                .expect("hit sfx"),
-        );
+        let flap = ctx
+            .audio
+            .create(&tone_wav(620.0, 0.07, 0.55))
+            .expect("flap sfx");
+        let score = ctx
+            .audio
+            .create(&tone_wav(980.0, 0.09, 0.45))
+            .expect("score sfx");
+        let hit = ctx
+            .audio
+            .create(&tone_wav(140.0, 0.22, 0.7))
+            .expect("hit sfx");
         let bgm = ctx
             .audio
-            .load(&Self::asset("bgm.ogg"))
+            .load(Path::new("assets/bgm.ogg"))
             .expect("bgm");
+        self.flap_sfx = Some(ctx.audio.pin(flap).expect("pin flap"));
+        self.score_sfx = Some(ctx.audio.pin(score).expect("pin score"));
+        self.hit_sfx = Some(ctx.audio.pin(hit).expect("pin hit"));
+        self.bgm = Some(ctx.audio.pin(bgm).expect("pin bgm"));
         ctx.audio.play_loop(bgm, BGM_VOL);
 
         *ctx.camera = Camera {
@@ -222,9 +238,9 @@ impl Game for Flappy {
     }
 
     fn update(&mut self, ctx: &mut Context) {
-        let white = self.white.expect("boot");
+        let white = self.white.as_ref().expect("boot").id();
         let font = self.font.clone().expect("boot");
-        let pipe_tex = self.pipe.expect("boot");
+        let pipe_tex = self.pipe.as_ref().expect("boot").id();
 
         if self.state != State::Over {
             if let Some(anim) = self.bird_anim.as_mut() {
@@ -245,8 +261,8 @@ impl Game for Flappy {
             State::Playing => {
                 if ctx.input.pressed(Key::Space) {
                     self.bird_vy = FLAP;
-                    if let Some(sfx) = self.flap_sfx {
-                        ctx.audio.play(sfx, SFX_VOL);
+                    if let Some(sfx) = self.flap_sfx.as_ref() {
+                        ctx.audio.play(sfx.id(), SFX_VOL);
                     }
                 }
                 self.bird_vy += GRAVITY * ctx.dt;
@@ -266,9 +282,9 @@ impl Game for Flappy {
                 despawn_offscreen(ctx.world);
                 let gained = update_score(ctx.world, self.bird, &mut self.score);
                 if gained > 0 {
-                    if let Some(sfx) = self.score_sfx {
+                    if let Some(sfx) = self.score_sfx.as_ref() {
                         for _ in 0..gained {
-                            ctx.audio.play(sfx, SFX_VOL);
+                            ctx.audio.play(sfx.id(), SFX_VOL);
                         }
                     }
                 }
@@ -276,8 +292,8 @@ impl Game for Flappy {
                 if hit_pipe_or_bounds(ctx.world, self.bird) {
                     self.state = State::Over;
                     self.bird_vy = 0.0;
-                    if let Some(sfx) = self.hit_sfx {
-                        ctx.audio.play(sfx, SFX_VOL);
+                    if let Some(sfx) = self.hit_sfx.as_ref() {
+                        ctx.audio.play(sfx.id(), SFX_VOL);
                     }
                 }
 
@@ -549,13 +565,6 @@ fn digit_atlas_rgba() -> (Vec<u8>, u32, u32) {
     (rgba, DIGIT_ATLAS_W, DIGIT_ATLAS_H)
 }
 
-/// `assets/` is copied beside the executable by `build.rs`.
-fn assets_dir(exe: &Path) -> PathBuf {
-    exe.parent()
-        .expect("executable path has a directory")
-        .join("assets")
-}
-
 fn main() {
     if let Err(err) = run(
         Config {
@@ -568,20 +577,5 @@ fn main() {
     ) {
         eprintln!("{err}");
         std::process::exit(1);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::assets_dir;
-    use std::path::PathBuf;
-
-    #[test]
-    fn assets_are_loaded_from_beside_the_executable() {
-        let exe = PathBuf::from("target").join("release").join("flappy.exe");
-        assert_eq!(
-            assets_dir(&exe),
-            PathBuf::from("target").join("release").join("assets")
-        );
     }
 }
