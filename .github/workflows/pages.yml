@@ -1,0 +1,75 @@
+name: pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: actions/configure-pages@v5
+
+      - name: Install trunk
+        run: |
+          set -euo pipefail
+          url="https://github.com/trunk-rs/trunk/releases/download/v0.22.0/trunk-x86_64-unknown-linux-gnu.tar.gz"
+          curl -fsSL "$url" -o /tmp/trunk.tar.gz
+          curl -fsSL "$url.sha256" -o /tmp/trunk.tar.gz.sha256
+          hash=$(awk '{print $1}' /tmp/trunk.tar.gz.sha256)
+          echo "$hash  /tmp/trunk.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/trunk-extract
+          tar -xzf /tmp/trunk.tar.gz -C /tmp/trunk-extract
+          install -m 755 "$(find /tmp/trunk-extract -type f -name trunk -print -quit)" "$HOME/.cargo/bin/trunk"
+          trunk --version
+
+      - name: Build sample games
+        env:
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          set -euo pipefail
+          site="$GITHUB_WORKSPACE/site"
+          mkdir -p "$site"
+          cp pages/index.html "$site/index.html"
+          touch "$site/.nojekyll"
+          for game in flappy twenty48 physics; do
+            (
+              cd "$GITHUB_WORKSPACE/games/$game"
+              trunk build --release --locked \
+                --public-url "/$REPO/$game/" \
+                --dist "$site/$game"
+              rm -f "$site/$game/.trunk-lock"
+            )
+          done
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
