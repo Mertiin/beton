@@ -26,8 +26,6 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - uses: actions/configure-pages@v5
-
       - name: Install trunk
         run: |
           set -euo pipefail
