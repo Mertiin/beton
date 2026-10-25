@@ -489,7 +489,10 @@ fn ask_connect_url() -> Option<String> {
         let default = format!("127.0.0.1:{DEFAULT_PORT}");
         let window = web_sys::window()?;
         let entered = window
-            .prompt_with_message_and_default("Connect to host (ip:port)", &default)
+            .prompt_with_message_and_default(
+                "Host (ip:port). On https pages use 127.0.0.1 or a wss:// URL — ws:// to a public IP is blocked.",
+                &default,
+            )
             .ok()??;
         let entered = entered.trim().to_string();
         if entered.is_empty() {

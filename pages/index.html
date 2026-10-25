@@ -37,8 +37,9 @@
         <li><a href="twenty48/">2048</a> — arrows or WASD. R restarts.</li>
         <li><a href="physics/">physics</a> — Space drops a box. Arrows or A/D kick it. R resets.</li>
         <li><a href="netplay/">netplay</a> — Pong client. C asks for <code>ip:port</code> (H cannot host in the browser).</li>
+        <li><a href="tetris/">tetris</a> — arrows / WASD, Space hard drop, C hold, R restart.</li>
       </ul>
-      <p class="note">Click the canvas so the page has keyboard focus. Escape does not quit in the browser. Netplay needs a desktop host; Pages is https so only localhost WebSocket works from this page.</p>
+      <p class="note">Click the canvas so the page has keyboard focus. Escape does not quit in the browser. Netplay on Pages (https) can only use <code>ws://127.0.0.1</code> or <code>wss://…</code> — plain <code>ws://</code> to a public IP is blocked by the browser.</p>
     </main>
   </body>
 </html>

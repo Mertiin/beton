@@ -57,9 +57,9 @@ Ok(())
 
 ## Networking (`web_net.rs`)
 
-`NetDriver::host` always returns an error — a tab cannot listen. `connect` opens `web_sys::WebSocket` with `BinaryType::Arraybuffer`. Callbacks push into a queue the frame drains.
+`NetDriver::host` always returns an error — a tab cannot listen. `connect` opens `web_sys::WebSocket` with `BinaryType::Arraybuffer` (`ws://` or `wss://`). Callbacks push into a queue the frame drains.
 
-Mixed content: from an `https://` page, `ws://` only works to localhost. Use `trunk serve` (http) or a same-machine desktop host when testing.
+Mixed content: from an `https://` page, `ws://` only works to localhost; use `wss://` for a remote host (TLS must terminate in front of the plain desktop listener). Prefer `trunk serve` (http) for LAN `ws://` testing.
 
 ## Related docs
 

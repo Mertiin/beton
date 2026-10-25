@@ -15,7 +15,7 @@ Use it like [`Input`](input.md): each frame the engine drains the socket into `c
 
 A match is therefore a **desktop host** plus desktop or browser clients. Only `ws://` (no TLS). `wss://` is out of scope for this slice.
 
-**Mixed content:** an `https://` page may only open `ws://` to `localhost` / `127.0.0.1`. Browser testing uses `trunk serve` (http) or a host on the same machine. Do not expect GitHub Pages to reach a LAN host over plain `ws://`.
+**Mixed content:** an `https://` page (e.g. GitHub Pages) may open `ws://` only to `localhost` / `127.0.0.1`, or `wss://` to any host. Plain `ws://` to a public/LAN IP is blocked by the browser. For remote play from Pages, put TLS in front of the desktop host (Caddy/nginx) and connect with `wss://…`. For LAN testing without TLS, use `trunk serve` (http) instead of Pages.
 
 ## Types
 

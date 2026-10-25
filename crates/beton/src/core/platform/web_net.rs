@@ -35,11 +35,9 @@ impl NetDriver {
         if !url.starts_with("ws://") && !url.starts_with("wss://") {
             return Err("URL must start with ws:// or wss://".into());
         }
-        // Plan targets ws:// for LAN samples; wss:// is allowed by the browser API
-        // but the engine docs still describe the desktop host as plain ws://.
-        if url.starts_with("wss://") {
-            return Err("only ws:// URLs are supported in this slice".into());
-        }
+        // From an https:// page the browser only allows ws:// to localhost, or wss://
+        // anywhere. The desktop host still speaks plain ws:// — terminate TLS in front
+        // (Caddy / nginx) when dialing a public host from GitHub Pages.
 
         let socket =
             WebSocket::new(url).map_err(|err| format!("net connect: {err:?}"))?;

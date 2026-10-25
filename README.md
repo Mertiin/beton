@@ -22,6 +22,7 @@ cargo run --release -p zombies
 cargo run --release -p twenty48
 cargo run --release -p physics
 cargo run --release -p netplay
+cargo run --release -p tetris
 ```
 
 - **flappy** — Space flaps (and restarts after game over).
@@ -29,6 +30,7 @@ cargo run --release -p netplay
 - **twenty48** — classic 2048; arrows or WASD slide, R restarts.
 - **physics** — rigid-body sandbox; Space drops a box, arrows/A/D kick the newest, R resets.
 - **netplay** — two-player Pong over WebSocket. Host is left paddle (simulates the ball); first client is right. `H` hosts port 7777, `C` connects. Or `netplay host [PORT]` / `netplay connect HOST:PORT`. W/S or arrows (mouse Y also works). Needs a desktop host (browser can only dial out).
+- **tetris** — classic Tetris (7-bag, hold, ghost). Arrows/WASD move, Up/W/X rotate, Z CCW, Space hard drop, C/Shift hold, R restarts. Board logic is isolated for a later battle-royale mode.
 
 Escape or the window close button exits.
 
@@ -64,7 +66,7 @@ trunk build --release
 
 Artifacts land in `target/twenty48-web/` or `games/flappy/dist/`.
 
-Pushes to `main` publish flappy, 2048, physics, and netplay to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay on Pages is a client only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
+Pushes to `main` publish flappy, 2048, physics, netplay, and tetris to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay on Pages is a client only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
 
 Click the canvas so it has keyboard focus. Escape does not quit on the web (it would leave a dead page). On flappy, click first so audio can start (browser gesture rule), then Space flaps. File assets listed in `Game::assets` are fetched over HTTP (Trunk copies `games/flappy/assets/` into the dist).
 
