@@ -15,6 +15,7 @@ pub use core::audio::{Audio, SoundHandle, SoundId, VoiceId};
 pub use core::camera::{Camera, Projection};
 pub use core::input::{Input, Key};
 pub use core::math::{Mat4, Rng, Vec3};
+pub use core::net::{Net, NetEvent, NetRole, PeerId, MAX_PAYLOAD, MAX_PEERS};
 pub use core::object::{
     integrate_velocities, step_rigid_bodies, GameObject, GameObjectId, Query, RigidBody, Velocity,
     World,

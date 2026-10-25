@@ -5,13 +5,22 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_net;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod web_net;
 
 #[cfg(not(target_arch = "wasm32"))]
 use native as backend;
 #[cfg(target_arch = "wasm32")]
 use web as backend;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) use native_net::NetDriver;
+#[cfg(target_arch = "wasm32")]
+pub(crate) use web_net::NetDriver;
 
 use std::future::Future;
 

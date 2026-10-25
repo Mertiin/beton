@@ -34,6 +34,7 @@ The other modules are `pub` so `lib.rs` can `pub use` their types. A game still 
 | `scene` | `scene/mod.rs` | [scene.md](scene.md) | One-frame sprites and text |
 | `camera` | `camera/mod.rs` | [camera.md](camera.md) | View and projection |
 | `input` | `input/mod.rs` | [input.md](input.md) | Keys and cursor |
+| `net` | `net/mod.rs` | [net.md](net.md) | Host / client message channel |
 | `anim` | `anim/mod.rs` | [anim.md](anim.md) | Sheets and clips |
 | `audio` | `audio/mod.rs` | [audio.md](audio.md) | Clips and voices |
 | `math` | `math/` | [math/mod.md](math/mod.md) | `Vec3`, `Mat4`, `Rng` |

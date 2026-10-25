@@ -49,8 +49,11 @@ Cargo target tables in `Cargo.toml` are the other allowed place for target-speci
 | `is_audio_gesture` | Whether this press should open audio |
 | `exit_on_escape` | Whether Escape calls `event_loop.exit()` |
 | `read_bytes` | Async file or HTTP load for [`Game::assets`](../app.md) |
+| `NetDriver` | Desktop / web WebSocket host-or-client used by [`net`](../net.md) |
 
 `run_loop`’s contract: on the web it returns `Ok(())` as soon as the loop is scheduled. Later failures go through `warn`, not through the `Result` from `run`.
+
+`NetDriver` is re-exported from `native_net` / `web_net`. Games never see it; they use [`Net`](../net.md) on `Context`.
 
 ## Rule for new features
 
@@ -61,4 +64,5 @@ If a feature touches the OS (files, fetch, gamepad, networking, threads), add a 
 - [native.md](native.md) — desktop bodies
 - [web.md](web.md) — browser bodies
 - [../app.md](../app.md) — the only caller that uses every function
+- [../net.md](../net.md) — public channel that owns a `NetDriver`
 - [../audio.md](../audio.md) — device open timing

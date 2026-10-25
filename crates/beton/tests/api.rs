@@ -1,8 +1,9 @@
 //! Compile-time / CPU-side check that the public API stays constructible without a GPU.
 
 use beton::{
-    integrate_velocities, step_rigid_bodies, Animation, Camera, Config, Font, GameObject,
-    Projection, RigidBody, SoundId, Sprite, SpriteSheet, TextureId, Vec3, Velocity, World,
+    integrate_velocities, step_rigid_bodies, Animation, Camera, Config, Font, GameObject, Net,
+    NetRole, PeerId, Projection, RigidBody, SoundId, Sprite, SpriteSheet, TextureId, Vec3,
+    Velocity, World, MAX_PAYLOAD, MAX_PEERS,
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -18,6 +19,11 @@ struct Collider {
 #[test]
 fn public_types_construct() {
     let _config = Config::default();
+    let net = Net::new();
+    assert_eq!(net.role(), NetRole::Offline);
+    assert_eq!(PeerId::HOST, PeerId(0));
+    assert!(MAX_PAYLOAD > 0);
+    assert!(MAX_PEERS > 0);
 
     let camera = Camera {
         eye: Vec3::new(0.0, 0.0, 10.0),

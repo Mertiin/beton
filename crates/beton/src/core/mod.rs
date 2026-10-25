@@ -7,6 +7,7 @@ pub mod audio;
 pub mod camera;
 pub mod input;
 pub mod math;
+pub mod net;
 pub mod object;
 pub(crate) mod platform;
 pub mod render;

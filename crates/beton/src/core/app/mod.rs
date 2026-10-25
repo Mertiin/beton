@@ -13,6 +13,7 @@ use winit::window::{Window, WindowId};
 use crate::core::audio::Audio;
 use crate::core::camera::Camera;
 use crate::core::input::Input;
+use crate::core::net::Net;
 use crate::core::object::World;
 use crate::core::platform::{self, Duration, Instant};
 use crate::core::render::{FrameError, Gfx, Renderer};
@@ -51,6 +52,8 @@ pub struct Context<'a> {
     pub time: f32,
     /// Keyboard and cursor snapshot for this frame.
     pub input: &'a Input,
+    /// Host / client message channel for this frame.
+    pub net: &'a mut Net,
     /// Framebuffer size in physical pixels `[width, height]`.
     pub fb_size: [f32; 2],
     /// Texture loading.
@@ -120,6 +123,7 @@ pub fn run(config: Config, game: impl Game + 'static) -> Result<(), String> {
         gfx: None,
         audio: Audio::silent(),
         input: Input::default(),
+        net: Net::new(),
         world: World::new(),
         scene: Scene::default(),
         camera: Camera::default(),
@@ -150,6 +154,7 @@ struct EngineApp<G: Game> {
     gfx: Option<Gfx>,
     audio: Audio,
     input: Input,
+    net: Net,
     world: World,
     scene: Scene,
     camera: Camera,
@@ -238,10 +243,12 @@ impl<G: Game> EngineApp<G> {
                 [s.width as f32, s.height as f32]
             })
             .unwrap_or([1.0, 1.0]);
+        self.net.begin_frame();
         let mut ctx = Context {
             dt: 0.0,
             time: 0.0,
             input: &self.input,
+            net: &mut self.net,
             fb_size,
             gfx,
             audio: &mut self.audio,
@@ -250,6 +257,7 @@ impl<G: Game> EngineApp<G> {
             camera: &mut self.camera,
         };
         self.game.boot(&mut ctx);
+        self.net.end_frame();
         self.booted = true;
         let now = Instant::now();
         self.start = now;
@@ -274,6 +282,7 @@ impl<G: Game> EngineApp<G> {
         let time = (now - self.start).as_secs_f32();
 
         self.scene.clear();
+        self.net.begin_frame();
 
         {
             let fb_size = self
@@ -289,6 +298,7 @@ impl<G: Game> EngineApp<G> {
                 dt,
                 time,
                 input: &self.input,
+                net: &mut self.net,
                 fb_size,
                 gfx,
                 audio: &mut self.audio,
@@ -298,6 +308,7 @@ impl<G: Game> EngineApp<G> {
             };
             self.game.update(&mut ctx);
         }
+        self.net.end_frame();
         self.audio.reap_finished();
         self.audio.resolve(dt);
 
@@ -364,6 +375,7 @@ impl<G: Game> EngineApp<G> {
 
         // Clear edge-triggered keys after the frame so KeyboardInput events
         // that arrived before RedrawRequested are still visible in update.
+        // Net events were already cleared in end_frame after update.
         self.input.begin_frame();
 
         if let Some(period) = self.frame_period() {

@@ -62,6 +62,7 @@ A bundle of borrows valid for one `boot` / `update` call:
 | `dt` | `f32` | Seconds since last frame, **capped at 0.1**. If the game hitch-stalls for a second, objects only jump as if 100 ms passed — they do not teleport. |
 | `time` | `f32` | Seconds since boot finished / clock reset. Useful for oscillators, pipe spawn schedules (`if time >= next_pipe_at`). |
 | `input` | `&Input` | Keys, plus cursor position (see [input.md](input.md)). |
+| `net` | `&mut Net` | Host / client messages for this frame (see [net.md](net.md)). |
 | `fb_size` | `[f32; 2]` | Framebuffer **physical** pixels `[width, height]`. Pair with `cursor_px` and `Camera::screen_to_world`. |
 | `gfx` | `&mut Gfx` | Load / create textures. Prefer loading in `boot`. |
 | `audio` | `&mut Audio` | Load / play sounds. Prefer loading in `boot`. |
@@ -85,17 +86,19 @@ This order is intentional. Knowing it prevents “why did my collision see last 
 
 1. **Measure time** — `now`, `dt = min(now - last, 0.1)`, `time = now - start`. The clock is reset when `boot` returns, so the first `update` starts near `time = 0`.
 2. **`scene.clear()`** — throw away last frame’s immediate draws.
-3. **`game.update(ctx)`** — your logic. Move game objects by writing local `pos` / `rotation` / `scale`, or by calling `integrate_velocities` / `step_rigid_bodies` (the frame loop does not call those for you).
-4. **Reap finished one-shot voices** — drop empty players so repeated `play` calls do not leak.
-5. **`audio.resolve(dt)`** — decode clips a voice still references; unload PCM that has been unused for 2 seconds.
-6. **Copy game-object sprites into the scene** — `World::draw_pose` (local fields when unparented; full parent walk otherwise), then set `center`, add world rotation to `sprite.rotation`, and multiply `sprite.size` by world scale.
-7. **`take_sorted()`** — sort all scene sprites by ascending Z, and collect the `TextureId`s those sprites use.
-8. **`camera.view_proj(aspect)`** — build the matrix for this window size.
-9. **`gfx.ensure_resident`** — upload any used or pinned texture that is not on the GPU yet.
-10. **`renderer.render(...)`** — upload + draw + present (see [render/mod.md](render/mod.md)).
-11. **`gfx.reap`** — after present, advance the unused timer and drop GPU textures past the 2 second grace. In-flight draws already sampled them.
-12. **`input.begin_frame()`** — clear the “pressed this frame” set so edges do not stick.
-13. **Schedule next wake** — if `max_fps` is set, `next_frame_at = now + 1/fps`.
+3. **`net.begin_frame()`** — move newly arrived network events onto this frame’s slice.
+4. **`game.update(ctx)`** — your logic. Move game objects by writing local `pos` / `rotation` / `scale`, or by calling `integrate_velocities` / `step_rigid_bodies` (the frame loop does not call those for you). Read `ctx.net.events()` here if you use the net channel.
+5. **`net.end_frame()`** — drop unread net events (one-frame lifetime, same idea as edge keys).
+6. **Reap finished one-shot voices** — drop empty players so repeated `play` calls do not leak.
+7. **`audio.resolve(dt)`** — decode clips a voice still references; unload PCM that has been unused for 2 seconds.
+8. **Copy game-object sprites into the scene** — `World::draw_pose` (local fields when unparented; full parent walk otherwise), then set `center`, add world rotation to `sprite.rotation`, and multiply `sprite.size` by world scale.
+9. **`take_sorted()`** — sort all scene sprites by ascending Z, and collect the `TextureId`s those sprites use.
+10. **`camera.view_proj(aspect)`** — build the matrix for this window size.
+11. **`gfx.ensure_resident`** — upload any used or pinned texture that is not on the GPU yet.
+12. **`renderer.render(...)`** — upload + draw + present (see [render/mod.md](render/mod.md)).
+13. **`gfx.reap`** — after present, advance the unused timer and drop GPU textures past the 2 second grace. In-flight draws already sampled them.
+14. **`input.begin_frame()`** — clear the “pressed this frame” set so edges do not stick.
+15. **Schedule next wake** — if `max_fps` is set, `next_frame_at = now + 1/fps`.
 
 ### Motion belongs to the game
 
@@ -178,7 +181,8 @@ impl Game for MyGame {
 - [object/world.md](object/world.md) — what lives across frames
 - [scene.md](scene.md) — what you draw once
 - [input.md](input.md) — keys and cursor
+- [net.md](net.md) — host / client messages on `Context::net`
 - [audio.md](audio.md) — load clips and play / stop
 - [asset.md](asset.md) — the 2 second residency rule
 - [platform/mod.md](platform/mod.md) — desktop vs web around this loop
-- [render/mod.md](render/mod.md) — what `render()` does with your sprites  
+- [render/mod.md](render/mod.md) — what `render()` does with your sprites

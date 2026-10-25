@@ -21,10 +21,12 @@ Each frame roughly does:
 
 1. Read keyboard into `Input`
 2. Clear the one-frame draw list (`Scene`)
-3. Call your `Game::update` — you move objects, push sprites/text
-4. Resolve each game object’s world pose and copy its sprite into the scene
-5. Resolve textures/sounds (load on use, unload after a short unused pause)
-6. Sort by Z, upload geometry, draw, present
+3. Drain network events into `Net`
+4. Call your `Game::update` — you move objects, push sprites/text, read/send net bytes
+5. Drop unread net events
+6. Resolve each game object’s world pose and copy its sprite into the scene
+7. Resolve textures/sounds (load on use, unload after a short unused pause)
+8. Sort by Z, upload geometry, draw, present
 
 ```
 ┌─────────────┐     ┌──────────────────┐     ┌─────────────────┐
@@ -64,16 +66,17 @@ One markdown file per source file. A module that is only `mod.rs` keeps a single
 | 13 | [core/scene.md](core/scene.md) | `src/core/scene/mod.rs` | Sprites, fonts, one-frame draw list |
 | 14 | [core/camera.md](core/camera.md) | `src/core/camera/mod.rs` | How world space maps into the window |
 | 15 | [core/input.md](core/input.md) | `src/core/input/mod.rs` | Keys held / pressed, cursor |
-| 16 | [core/anim.md](core/anim.md) | `src/core/anim/mod.rs` | Sprite sheets and frame clips |
-| 17 | [core/audio.md](core/audio.md) | `src/core/audio/mod.rs` | Register clips, play / pin / resolve |
-| 18 | [core/asset.md](core/asset.md) | `src/core/asset.rs` | Shared load / grace / unload rules |
-| 19 | [core/math/vec3.md](core/math/vec3.md) | `src/core/math/vec3.rs` | Positions and directions |
-| 20 | [core/math/mat4.md](core/math/mat4.md) | `src/core/math/mat4.rs` | Camera matrices |
-| 21 | [core/math/rng.md](core/math/rng.md) | `src/core/math/rng.rs` | Tiny random numbers |
-| 22 | [core/math/mod.md](core/math/mod.md) | `src/core/math/mod.rs` | Math module glue |
-| 23 | [core/render/texture.md](core/render/texture.md) | `src/core/render/texture.rs` | Register / pin / resolve textures |
-| 24 | [core/render/mod.md](core/render/mod.md) | `src/core/render/mod.rs` | The renderer (internal) |
-| 25 | [core/render/shader.md](core/render/shader.md) | `src/core/render/shader.wgsl` | GPU vertex + fragment programs |
+| 16 | [core/net.md](core/net.md) | `src/core/net/mod.rs` | Host / client WebSocket messages |
+| 17 | [core/anim.md](core/anim.md) | `src/core/anim/mod.rs` | Sprite sheets and frame clips |
+| 18 | [core/audio.md](core/audio.md) | `src/core/audio/mod.rs` | Register clips, play / pin / resolve |
+| 19 | [core/asset.md](core/asset.md) | `src/core/asset.rs` | Shared load / grace / unload rules |
+| 20 | [core/math/vec3.md](core/math/vec3.md) | `src/core/math/vec3.rs` | Positions and directions |
+| 21 | [core/math/mat4.md](core/math/mat4.md) | `src/core/math/mat4.rs` | Camera matrices |
+| 22 | [core/math/rng.md](core/math/rng.md) | `src/core/math/rng.rs` | Tiny random numbers |
+| 23 | [core/math/mod.md](core/math/mod.md) | `src/core/math/mod.rs` | Math module glue |
+| 24 | [core/render/texture.md](core/render/texture.md) | `src/core/render/texture.rs` | Register / pin / resolve textures |
+| 25 | [core/render/mod.md](core/render/mod.md) | `src/core/render/mod.rs` | The renderer (internal) |
+| 26 | [core/render/shader.md](core/render/shader.md) | `src/core/render/shader.wgsl` | GPU vertex + fragment programs |
 
 ## Glossary
 

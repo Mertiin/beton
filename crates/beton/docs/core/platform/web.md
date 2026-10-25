@@ -55,9 +55,16 @@ Ok(())
 | `is_audio_gesture` | the press flag | A key-down or left click may call `try_open_device`. Plays queued while silent start then. |
 | `exit_on_escape` | `false` | Escape is delivered to the game like any other key. |
 
+## Networking (`web_net.rs`)
+
+`NetDriver::host` always returns an error — a tab cannot listen. `connect` opens `web_sys::WebSocket` with `BinaryType::Arraybuffer`. Callbacks push into a queue the frame drains.
+
+Mixed content: from an `https://` page, `ws://` only works to localhost. Use `trunk serve` (http) or a same-machine desktop host when testing.
+
 ## Related docs
 
 - [mod.md](mod.md) — shared API
 - [native.md](native.md) — desktop bodies
+- [../net.md](../net.md) — public API
 - [../app.md](../app.md) — scheduling and the gesture check
 - [../audio.md](../audio.md) — queued plays before the device exists

@@ -50,8 +50,19 @@ This **does not return** until the window closes or `event_loop.exit()` runs. Th
 | `is_audio_gesture` | `false` | Key and mouse presses do not try to open audio again. |
 | `exit_on_escape` | `true` | Escape leaves the process. |
 
+## Networking (`native_net.rs`)
+
+`NetDriver` hosts or dials plain `ws://` with `tungstenite` (handshake feature, no TLS, no Tokio).
+
+- **Host:** bind `0.0.0.0`, accept thread, one I/O thread per peer (read with a short timeout + drain an `mpsc` write channel). At most 8 remotes.
+- **Client:** one I/O thread for the single socket.
+- Events land in a shared queue; the frame loop swaps it out. `Drop` / `shutdown` closes sockets, wakes accept via `127.0.0.1:port` (not `0.0.0.0`), and joins threads.
+
+First bind on Windows may prompt the firewall.
+
 ## Related docs
 
 - [mod.md](mod.md) — why these functions exist
 - [web.md](web.md) — the other backend
+- [../net.md](../net.md) — public API
 - [../app.md](../app.md) — call sites

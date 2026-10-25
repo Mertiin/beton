@@ -28,6 +28,7 @@ web-time = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 pollster = { workspace = true }
 rodio = { workspace = true }
+tungstenite = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rodio = { workspace = true, features = ["wasm-bindgen"] }
@@ -40,5 +41,10 @@ web-sys = { workspace = true, features = [
     "HtmlCanvasElement",
     "Response",
     "console",
+    "WebSocket",
+    "MessageEvent",
+    "BinaryType",
+    "CloseEvent",
+    "ErrorEvent",
 ] }
 console_error_panic_hook = { workspace = true }

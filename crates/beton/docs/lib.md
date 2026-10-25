@@ -39,6 +39,7 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | `core::scene` | One-frame sprites + text | yes — `Sprite`, `Font`, `Scene` |
 | `core::camera` | View into the world | yes — `Camera`, `Projection` |
 | `core::input` | Keyboard snapshot | yes — `Input`, `Key` |
+| `core::net` | Host / client messages | yes — `Net`, `NetEvent`, `NetRole`, `PeerId`, caps |
 | `core::anim` | Sheets + clips | yes — `SpriteSheet`, `Animation` |
 | `core::audio` | Sound register + playback | yes — `Audio`, `SoundId`, `SoundHandle`, `VoiceId` |
 | `core::math` | Vectors, matrices, RNG | yes — `Vec3`, `Mat4`, `Rng` |
@@ -56,6 +57,8 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | `Game` | Trait you implement (`boot` + `update`) |
 | `Camera`, `Projection` | Where you look from / how it projects |
 | `Input`, `Key` | Held keys and “just pressed” edges |
+| `Net`, `NetEvent`, `NetRole`, `PeerId` | LAN WebSocket channel (opaque bytes) |
+| `MAX_PAYLOAD`, `MAX_PEERS` | Net send / accept caps |
 | `Vec3`, `Mat4`, `Rng` | Math helpers |
 | `Gfx`, `TextureId`, `TextureHandle` | Register / pin textures |
 | `Audio`, `SoundId`, `SoundHandle`, `VoiceId` | Register / pin / play clips |

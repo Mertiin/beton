@@ -48,7 +48,7 @@ jobs:
           mkdir -p "$site"
           cp pages/index.html "$site/index.html"
           touch "$site/.nojekyll"
-          for game in flappy twenty48 physics; do
+          for game in flappy twenty48 physics netplay; do
             (
               cd "$GITHUB_WORKSPACE/games/$game"
               trunk build --release --locked \
