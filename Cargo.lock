@@ -1159,6 +1159,7 @@ name = "netplay"
 version = "0.1.0"
 dependencies = [
  "beton",
+ "web-sys",
 ]
 
 [[package]]

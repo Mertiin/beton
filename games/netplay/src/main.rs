@@ -1,7 +1,8 @@
 //! Two-player Pong over the beton net channel.
 //!
 //! Host is the left paddle and simulates the ball. The first client is the right
-//! paddle. `H` hosts port 7777, `C` connects to `ws://127.0.0.1:7777`.
+//! paddle. `H` hosts port 7777, `C` connects (desktop defaults to localhost; the
+//! browser page prompts for `ip:port`).
 //! Also: `netplay host [PORT]` / `netplay connect HOST:PORT`.
 //!
 //! Controls: W/S or ↑/↓ move your paddle (mouse Y also works while inside the window).
@@ -449,7 +450,9 @@ impl Game for NetPlay {
             self.try_host(ctx, DEFAULT_PORT);
         }
         if ctx.input.pressed(Key::KeyC) && ctx.net.role() == NetRole::Offline {
-            self.try_connect(ctx, &format!("ws://127.0.0.1:{DEFAULT_PORT}"));
+            if let Some(url) = ask_connect_url() {
+                self.try_connect(ctx, &url);
+            }
         }
 
         self.handle_events(ctx);
@@ -470,6 +473,37 @@ impl Game for NetPlay {
     }
 }
 
+fn to_ws_url(addr: &str) -> String {
+    let addr = addr.trim();
+    if addr.starts_with("ws://") || addr.starts_with("wss://") {
+        addr.to_string()
+    } else {
+        format!("ws://{addr}")
+    }
+}
+
+/// Address to dial when the player presses `C`. On the web this opens a prompt.
+fn ask_connect_url() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let default = format!("127.0.0.1:{DEFAULT_PORT}");
+        let window = web_sys::window()?;
+        let entered = window
+            .prompt_with_message_and_default("Connect to host (ip:port)", &default)
+            .ok()??;
+        let entered = entered.trim().to_string();
+        if entered.is_empty() {
+            None
+        } else {
+            Some(to_ws_url(&entered))
+        }
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        Some(to_ws_url(&format!("127.0.0.1:{DEFAULT_PORT}")))
+    }
+}
+
 fn parse_args(args: &[String]) -> BootAction {
     match args.get(1).map(String::as_str) {
         Some("host") => {
@@ -484,12 +518,7 @@ fn parse_args(args: &[String]) -> BootAction {
                 .get(2)
                 .cloned()
                 .unwrap_or_else(|| format!("127.0.0.1:{DEFAULT_PORT}"));
-            let url = if addr.starts_with("ws://") {
-                addr
-            } else {
-                format!("ws://{addr}")
-            };
-            BootAction::Connect(url)
+            BootAction::Connect(to_ws_url(&addr))
         }
         _ => BootAction::None,
     }

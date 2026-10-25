@@ -8,3 +8,6 @@ publish = false
 
 [dependencies]
 beton = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { workspace = true, features = ["Window"] }
