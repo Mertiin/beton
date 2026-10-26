@@ -29,6 +29,7 @@ There is a **beginner guide for every source file** under [`docs/`](docs/README.
 
 - `png` / `jpeg` — decode those formats in `Gfx::load_texture` (both on by default). A game that only uses `Gfx::create_texture` can disable them.
 - `wav` / `vorbis` — decode those formats in `Audio::load` / `Audio::create` (both on by default).
+- `physics` — Rapier 2D rigid bodies (`RigidBody`, `step_rigid_bodies`). Off by default, so games that only move sprites do not link it. The physics sample enables it.
 
 ## Keyboard
 

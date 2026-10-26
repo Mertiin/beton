@@ -1,5 +1,7 @@
 # `src/core/object/rigid.rs`
 
+Compiled only with the `physics` feature (`beton = { features = ["physics"] }`). Off by default.
+
 ## Purpose
 
 Built-in **rigid body** material and a free-function step that drives [Rapier 2D](https://rapier.rs/). Mass and bounce live here. Linear and angular speed live on [`Velocity`](velocity.md).

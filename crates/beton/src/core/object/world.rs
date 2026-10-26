@@ -4,6 +4,7 @@ use crate::core::math::Vec3;
 
 use super::component::{ComponentMap, Query};
 use super::game_object::{GameObject, GameObjectId};
+#[cfg(feature = "physics")]
 use super::rigid::PhysicsSim;
 
 #[derive(Clone)]
@@ -19,6 +20,7 @@ pub struct World {
     free: Vec<u32>,
     pub(super) components: ComponentMap,
     /// Rapier simulation used by [`super::rigid::step_rigid_bodies`].
+    #[cfg(feature = "physics")]
     pub(super) physics: PhysicsSim,
 }
 
@@ -204,12 +206,17 @@ impl World {
             })
     }
 
-    /// Remove every game object, every component, and the rigid-body simulation.
+    /// Remove every game object and every component.
+    ///
+    /// With the `physics` feature, also drops the rigid-body simulation.
     pub fn clear(&mut self) {
         self.slots.clear();
         self.free.clear();
         self.components.clear_all();
-        self.physics = PhysicsSim::default();
+        #[cfg(feature = "physics")]
+        {
+            self.physics = PhysicsSim::default();
+        }
     }
 
     /// Direct children of `id`.

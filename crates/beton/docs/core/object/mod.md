@@ -10,11 +10,11 @@ Module root for retained game objects. Like [`math/mod.rs`](../math/mod.md), thi
 | `world.rs` | `World` | [world.md](world.md) |
 | `component.rs` | `Query` | [component.md](component.md) |
 | `velocity.rs` | `Velocity`, `integrate_velocities` | [velocity.md](velocity.md) |
-| `rigid.rs` | `RigidBody`, `step_rigid_bodies` | [rigid.md](rigid.md) |
+| `rigid.rs` | `RigidBody`, `step_rigid_bodies` (feature `physics`) | [rigid.md](rigid.md) |
 
 `lib.rs` then exports those names from `beton`. `ComponentStore` and `ComponentMap` stay private to this module — games attach data through `World::insert` and `World::each`, not by building a store themselves.
 
-`World`'s public API stays type-agnostic. `Velocity` and `RigidBody` are ordinary components; their steppers are free functions over `&mut World`, not methods on it. The rigid stepper keeps a private Rapier simulation on `World` so bodies survive from frame to frame.
+`World`'s public API stays type-agnostic. `Velocity` is an ordinary component. `RigidBody` is too, when the `physics` feature is on. Their steppers are free functions over `&mut World`, not methods on it. With that feature, the rigid stepper keeps a private Rapier simulation on `World` so bodies survive from frame to frame. Without it, Rapier is not linked.
 
 ## How the files split the work
 

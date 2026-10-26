@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Built-in **velocity** component (linear + angular) and a free-function integrator. This is the only engine type that holds units/second and radians/second. A pipe, a bullet, and a crate all use it; only the crate also needs [`RigidBody`](rigid.md).
+Built-in **velocity** component (linear + angular) and a free-function integrator. This is the only engine type that holds units/second and radians/second. A pipe, a bullet, and a crate all use it; only the crate also needs [`RigidBody`](rigid.md), and only when the `physics` feature is on.
 
 `World` does not know about this type. Attach it with `world.insert` like any other component.
 
@@ -23,7 +23,7 @@ world.insert(id, Velocity::linear(Vec3::new(-6.0, 0.0, 0.0)));
 
 ## `integrate_velocities(world, dt)`
 
-Writes `pos += linear * dt` and `rotation += angular * dt` for **unparented** objects that have `Velocity` and do **not** have a `RigidBody`.
+Writes `pos += linear * dt` and `rotation += angular * dt` for **unparented** objects that have `Velocity`. With the `physics` feature, objects that also have a `RigidBody` are skipped.
 
 | Object has… | Result |
 |-------------|--------|

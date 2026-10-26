@@ -7,4 +7,4 @@ license.workspace = true
 publish = false
 
 [dependencies]
-beton = { workspace = true }
+beton = { workspace = true, features = ["physics"] }

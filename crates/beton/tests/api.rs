@@ -1,10 +1,13 @@
 //! Compile-time / CPU-side check that the public API stays constructible without a GPU.
 
 use beton::{
-    integrate_velocities, step_rigid_bodies, Animation, Camera, Config, Font, GameObject, Net,
-    NetRole, PeerId, Projection, RigidBody, SoundId, Sprite, SpriteSheet, TextureId, Vec3,
-    Velocity, World, MAX_PAYLOAD, MAX_PEERS,
+    integrate_velocities, Animation, Camera, Config, Font, GameObject, Net, NetRole, PeerId,
+    Projection, SoundId, Sprite, SpriteSheet, TextureId, Vec3, Velocity, World, MAX_PAYLOAD,
+    MAX_PEERS,
 };
+
+#[cfg(feature = "physics")]
+use beton::{step_rigid_bodies, RigidBody};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Body {
@@ -116,18 +119,21 @@ fn public_types_construct() {
     integrate_velocities(&mut world, 0.5);
     assert!((world.get(mover).unwrap().pos.x - 1.0).abs() < 1e-5);
 
-    let crate_id = world.spawn(GameObject {
-        pos: Vec3::new(0.0, 2.0, 0.0),
-        rotation: 0.0,
-        scale: [1.0, 1.0],
-        parent: None,
-        size: [1.0, 1.0],
-        sprite: None,
-        tag: 0,
-    });
-    world.insert(crate_id, Velocity::ZERO);
-    world.insert(crate_id, RigidBody::dynamic(1.0));
-    let _fixed = RigidBody::fixed();
-    step_rigid_bodies(&mut world, 0.1, Vec3::new(0.0, -32.0, 0.0));
-    assert!(world.get_component::<Velocity>(crate_id).unwrap().linear.y < 0.0);
+    #[cfg(feature = "physics")]
+    {
+        let crate_id = world.spawn(GameObject {
+            pos: Vec3::new(0.0, 2.0, 0.0),
+            rotation: 0.0,
+            scale: [1.0, 1.0],
+            parent: None,
+            size: [1.0, 1.0],
+            sprite: None,
+            tag: 0,
+        });
+        world.insert(crate_id, Velocity::ZERO);
+        world.insert(crate_id, RigidBody::dynamic(1.0));
+        let _fixed = RigidBody::fixed();
+        step_rigid_bodies(&mut world, 0.1, Vec3::new(0.0, -32.0, 0.0));
+        assert!(world.get_component::<Velocity>(crate_id).unwrap().linear.y < 0.0);
+    }
 }

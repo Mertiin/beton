@@ -17,8 +17,9 @@ pub use core::input::{Input, Key};
 pub use core::math::{Mat4, Rng, Vec3};
 pub use core::net::{Net, NetEvent, NetRole, PeerId, MAX_PAYLOAD, MAX_PEERS};
 pub use core::object::{
-    integrate_velocities, step_rigid_bodies, GameObject, GameObjectId, Query, RigidBody, Velocity,
-    World,
+    integrate_velocities, GameObject, GameObjectId, Query, Velocity, World,
 };
+#[cfg(feature = "physics")]
+pub use core::object::{step_rigid_bodies, RigidBody};
 pub use core::render::{Gfx, TextureHandle, TextureId};
 pub use core::scene::{Font, Scene, Sprite};

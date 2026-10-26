@@ -2,14 +2,15 @@
 
 use crate::core::math::Vec3;
 
+#[cfg(feature = "physics")]
 use super::rigid::RigidBody;
 use super::world::World;
 
 /// Velocity in world space: linear units/second, angular radians/second.
 ///
-/// Attach with [`World::insert`]. Call [`integrate_velocities`] for objects that
-/// have this and no [`RigidBody`](super::rigid::RigidBody). Objects with both
-/// are stepped by [`super::rigid::step_rigid_bodies`] instead.
+/// Attach with [`World::insert`] and call [`integrate_velocities`]. With the
+/// `physics` feature, an object that also has a `RigidBody` is left for
+/// `step_rigid_bodies`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Velocity {
     /// Linear velocity (units / second).
@@ -41,10 +42,11 @@ impl Velocity {
 }
 
 /// Write `pos += linear * dt` and `rotation += angular * dt` for unparented
-/// objects that have [`Velocity`] and do not have a [`RigidBody`].
+/// objects that have [`Velocity`].
 ///
-/// Skips parented objects and anything with a `RigidBody` (dynamic bodies are
-/// owned by the rigid step; fixed bodies ignore a stuck `Velocity`).
+/// Skips parented objects. With the `physics` feature, also skips anything with
+/// a `RigidBody` (the rigid step owns dynamic bodies; a fixed body ignores a
+/// stuck `Velocity`).
 ///
 /// `dt <= 0` is a no-op.
 pub fn integrate_velocities(world: &mut World, dt: f32) {
@@ -60,6 +62,7 @@ pub fn integrate_velocities(world: &mut World, dt: f32) {
     });
 
     for id in ids {
+        #[cfg(feature = "physics")]
         if world.contains_component::<RigidBody>(id) {
             continue;
         }
@@ -74,6 +77,7 @@ pub fn integrate_velocities(world: &mut World, dt: f32) {
 mod tests {
     use super::*;
     use crate::core::object::game_object::GameObject;
+    #[cfg(feature = "physics")]
     use crate::core::object::rigid::RigidBody;
 
     fn bare(pos: Vec3) -> GameObject {
@@ -112,6 +116,7 @@ mod tests {
         assert!((world.get(id).unwrap().rotation - 1.0).abs() < 1e-5);
     }
 
+    #[cfg(feature = "physics")]
     #[test]
     fn integrate_skips_dynamic_rigid_body() {
         let mut world = World::new();
@@ -122,6 +127,7 @@ mod tests {
         assert_eq!(world.get(id).unwrap().pos, Vec3::ZERO);
     }
 
+    #[cfg(feature = "physics")]
     #[test]
     fn integrate_skips_fixed_body_with_stuck_velocity() {
         let mut world = World::new();

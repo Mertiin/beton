@@ -34,7 +34,7 @@ There is no `velocity` field on this struct. The frame loop does not integrate m
 world.insert(id, Velocity::linear(Vec3::new(0.0, -2.0, 0.0)));
 integrate_velocities(world, dt);
 
-// Falling crate: mass + velocity, then the rigid step.
+// Falling crate (`physics` feature): mass + velocity, then the rigid step.
 world.insert(crate_id, Velocity::ZERO);
 world.insert(crate_id, RigidBody::dynamic(1.0));
 step_rigid_bodies(world, dt, Vec3::new(0.0, -32.0, 0.0));

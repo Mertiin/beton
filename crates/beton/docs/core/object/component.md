@@ -8,7 +8,7 @@ Games do not construct anything in this file. They call `world.insert` / `world.
 
 ## Beginner picture
 
-A component is a sticky note of one Rust type (`Body`, `Collider`, …). The engine also ships built-in motion notes — [`Velocity`](velocity.md) and [`RigidBody`](rigid.md) — so games do not invent a second speed field. Storage here is the same for those and for your own types.
+A component is a sticky note of one Rust type (`Body`, `Collider`, …). The engine also ships a built-in motion note — [`Velocity`](velocity.md) — and, with the `physics` feature, [`RigidBody`](rigid.md). Storage here is the same for those and for your own types.
 
 - An object may have at most **one** value of each type.
 - Most objects will not have most types. A bullet does not pay for a `Health` slot it never uses.

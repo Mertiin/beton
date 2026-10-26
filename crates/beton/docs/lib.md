@@ -35,7 +35,7 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | Module | Responsibility | Re-exported? |
 |--------|----------------|--------------|
 | `core::app` | Window, clock, `Game` loop | yes — `run`, `Config`, `Context`, `Game` |
-| `core::object` | Retained game objects + components | yes — `GameObject`, `GameObjectId`, `World`, `Query`, `Velocity`, `RigidBody`, steppers |
+| `core::object` | Retained game objects + components | yes — `GameObject`, `GameObjectId`, `World`, `Query`, `Velocity`, and with `physics`: `RigidBody`, steppers |
 | `core::scene` | One-frame sprites + text | yes — `Sprite`, `Font`, `Scene` |
 | `core::camera` | View into the world | yes — `Camera`, `Projection` |
 | `core::input` | Keyboard snapshot | yes — `Input`, `Key` |
@@ -65,7 +65,7 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | `Sprite`, `Font`, `Scene` | Drawing primitives |
 | `GameObject`, `GameObjectId`, `World`, `Query` | Entities and components |
 | `Velocity`, `integrate_velocities` | Shared linear + angular speed; plain integrate |
-| `RigidBody`, `step_rigid_bodies` | Mass / material; Rapier cuboid gravity and contacts |
+| `RigidBody`, `step_rigid_bodies` | `physics` feature. Mass / material; Rapier cuboid gravity and contacts |
 | `SpriteSheet`, `Animation` | Atlas UV math + timed frame playback |
 
 ## How to extend the API later

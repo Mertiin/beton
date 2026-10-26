@@ -11,8 +11,8 @@ pub struct GameObjectId(pub(crate) u32, pub(crate) u32);
 ///
 /// The frame loop does not integrate motion. Write [`GameObject::pos`],
 /// [`GameObject::rotation`], and [`GameObject::scale`] yourself, or attach
-/// [`super::Velocity`] / [`super::RigidBody`] and call
-/// [`super::integrate_velocities`] / [`super::step_rigid_bodies`].
+/// [`super::Velocity`] and call [`super::integrate_velocities`]. The `physics`
+/// feature adds a rigid-body step for the same objects.
 ///
 /// Extra data (health, AI, …) is attached with [`super::World::insert`], not
 /// as fields on this struct.
@@ -26,7 +26,7 @@ pub struct GameObject {
     pub scale: [f32; 2],
     /// Parent in the transform hierarchy.
     pub parent: Option<GameObjectId>,
-    /// Unscaled cuboid width and height. Physics uses `size * scale` as an oriented box.
+    /// Unscaled width and height. With the `physics` feature, `size * scale` is an oriented cuboid.
     pub size: [f32; 2],
     /// Drawn at the resolved world pose each frame when `Some`.
     pub sprite: Option<Sprite>,
