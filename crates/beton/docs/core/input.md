@@ -68,14 +68,16 @@ Turn pixels into world XY with `ctx.camera.screen_to_world(ctx.input.cursor_px()
 
 | API | Meaning |
 |-----|---------|
-| `pointer_down()` | Left mouse button currently held |
-| `pointer_pressed()` | Left button went down **this frame** |
+| `pointer_down()` | Left mouse / primary touch currently held |
+| `pointer_pressed()` | Left button or touch went down **this frame** |
 
-Same edge rules as keys: OS repeats do not spam `pointer_pressed`. Cleared in `begin_frame` after the frame. Used by [ui.md](ui.md) for clicks; a left press still unlocks audio on the web.
+Same edge rules as keys: OS repeats do not spam `pointer_pressed`. Cleared in `begin_frame` after the frame. Used by [ui.md](ui.md) for clicks; a press still unlocks audio on the web.
+
+On the web, fingers arrive as `WindowEvent::Touch` (not mouse). The engine maps touch start/end onto the same pointer APIs and updates `cursor_px` from the touch location.
 
 ## What this module does not handle
 
-- Right / middle mouse buttons, or touch points
+- Right / middle mouse buttons, or multi-touch gestures
 - Gamepad
 - Text input (for typing your name) — that needs characters, not key codes
 - Key binding remapping UI

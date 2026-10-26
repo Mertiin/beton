@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, WindowEvent};
+use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -501,6 +501,21 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
                     let pressed = state == ElementState::Pressed;
                     self.input.pointer_event(pressed);
                     self.maybe_open_audio(pressed);
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                // Web sends Touch for fingers; MouseInput is mouse/pen only.
+                self.input
+                    .cursor_moved(touch.location.x as f32, touch.location.y as f32);
+                match touch.phase {
+                    TouchPhase::Started => {
+                        self.input.pointer_event(true);
+                        self.maybe_open_audio(true);
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        self.input.pointer_event(false);
+                    }
+                    TouchPhase::Moved => {}
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
