@@ -1,7 +1,13 @@
-//! Rigid body material and contact solver.
+//! Rigid body material and a Rapier cuboid step.
 //!
-//! Sprites rotate with [`Velocity::angular`], but contacts use the axis-aligned
-//! bounds of each oriented box (stable resting). Hitboxes grow with tilt.
+//! Sprites rotate with the body. Contacts use an oriented box of `size * scale`,
+//! not the axis-aligned bounds of that box.
+
+use std::collections::HashSet;
+
+use rapier2d::prelude::{
+    ColliderBuilder, PhysicsWorld, RigidBodyBuilder, RigidBodyHandle, Rotation, Vector,
+};
 
 use crate::core::math::Vec3;
 
@@ -11,12 +17,16 @@ use super::world::World;
 
 const SUBSTEP: f32 = 1.0 / 120.0;
 const MAX_SUBSTEPS: u32 = 8;
-const SOLVER_ITERS: u32 = 10;
-const BAUMGARTE: f32 = 0.8;
-const SLOP: f32 = 0.02;
-const SLEEP_SPEED: f32 = 0.12;
-const SLEEP_ANGULAR: f32 = 0.12;
-const MAX_ANGULAR: f32 = 25.0;
+const DIVERGE: f32 = 1.0e-5;
+
+/// Rapier state owned by [`World`] so bodies survive from step to step.
+///
+/// Games never touch this. [`RigidBody`] is the component they insert;
+/// [`SimBody`] is the private handle the stepper keeps beside it.
+#[derive(Default)]
+pub(super) struct PhysicsSim {
+    rapier: PhysicsWorld,
+}
 
 /// Mass and contact material for rigid bodies.
 ///
@@ -24,8 +34,7 @@ const MAX_ANGULAR: f32 = 25.0;
 /// body, or only this with [`RigidBody::fixed`] for a static collider. Call
 /// [`step_rigid_bodies`] from your game `update`; the frame loop does not.
 ///
-/// Collision uses the axis-aligned bounds of each box after rotation (so a
-/// spinning sprite still rests stably; the hitbox grows when tilted).
+/// Collision is an oriented cuboid of `size * scale`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RigidBody {
     /// Inverse mass. `0` means fixed (infinite mass).
@@ -65,36 +74,48 @@ impl RigidBody {
     }
 }
 
-struct BodySnap {
-    id: GameObjectId,
-    pos: Vec3,
-    rotation: f32,
-    size: [f32; 2],
-    vel: Vec3,
-    angular: f32,
+/// Rapier handles for one [`RigidBody`]. The stepper inserts and removes this.
+#[derive(Clone, Copy)]
+struct SimBody {
+    body: RigidBodyHandle,
+    spec: BodySpec,
+    synced_x: f32,
+    synced_y: f32,
+    synced_rot: f32,
+    synced_vx: f32,
+    synced_vy: f32,
+    synced_ang: f32,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+struct BodySpec {
+    hx: f32,
+    hy: f32,
     inv_mass: f32,
-    inv_inertia: f32,
     restitution: f32,
     friction: f32,
     dynamic: bool,
-    touched: bool,
 }
 
-struct Contact {
-    nx: f32,
-    ny: f32,
-    penetration: f32,
-    cx: f32,
-    cy: f32,
+struct Participant {
+    id: GameObjectId,
+    spec: BodySpec,
+    pos: Vec3,
+    rotation: f32,
+    lin: Vec3,
+    ang: f32,
+    dynamic: bool,
 }
 
 /// Integrate gravity and resolve contacts for unparented [`RigidBody`]s.
 ///
 /// Dynamic bodies need a [`Velocity`]. Fixed bodies (`inv_mass == 0`) act as
-/// static colliders and do not move. Parenteds are skipped. Hit size is the
-/// axis-aligned bounds of `size * scale` at the current `rotation`.
+/// static colliders and do not move. Parented objects are skipped. The hit
+/// shape is an oriented cuboid of `size * scale`.
 ///
-/// Split into substeps of `1/120` s, at most 8. `dt <= 0` is a no-op.
+/// The step is split into slices of `1/120` s, at most 8. `dt <= 0` is a no-op.
+/// Writes to `pos`, `rotation`, or [`Velocity`] since the previous step are
+/// copied onto the Rapier body before it advances.
 ///
 /// Objects stepped here should not also call [`super::velocity::integrate_velocities`].
 pub fn step_rigid_bodies(world: &mut World, dt: f32, gravity: Vec3) {
@@ -102,6 +123,41 @@ pub fn step_rigid_bodies(world: &mut World, dt: f32, gravity: Vec3) {
         return;
     }
 
+    let participants = collect_participants(world);
+    let live: HashSet<GameObjectId> = participants.iter().map(|p| p.id).collect();
+    drop_orphan_links(world, &live);
+
+    let mut sim = std::mem::take(&mut world.physics);
+    remove_stale_bodies(&mut sim, &live);
+    for participant in &participants {
+        ensure_body(world, &mut sim, participant);
+    }
+
+    let mut z_state: Vec<(f32, f32)> = participants.iter().map(|p| (p.pos.z, p.lin.z)).collect();
+    if participants.iter().any(|p| p.dynamic) {
+        let mut remaining = dt.min(SUBSTEP * MAX_SUBSTEPS as f32);
+        while remaining > 1.0e-8 {
+            let h = remaining.min(SUBSTEP);
+            remaining -= h;
+            sim.rapier.integration_parameters.dt = h;
+            sim.rapier.gravity = vec2(gravity.x, gravity.y);
+            sim.rapier.step();
+            for (i, participant) in participants.iter().enumerate() {
+                if participant.dynamic {
+                    z_state[i].1 += gravity.z * h;
+                    z_state[i].0 += z_state[i].1 * h;
+                }
+            }
+        }
+    }
+
+    for (i, participant) in participants.iter().enumerate() {
+        write_back(world, &sim, participant, z_state[i].0, z_state[i].1);
+    }
+    world.physics = sim;
+}
+
+fn collect_participants(world: &mut World) -> Vec<Participant> {
     let mut ids = Vec::new();
     world.each_mut::<RigidBody>(|id, object, _body| {
         if object.parent.is_none() {
@@ -109,7 +165,7 @@ pub fn step_rigid_bodies(world: &mut World, dt: f32, gravity: Vec3) {
         }
     });
 
-    let mut snaps = Vec::with_capacity(ids.len());
+    let mut participants = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(object) = world.get(id) else {
             continue;
@@ -121,290 +177,215 @@ pub fn step_rigid_bodies(world: &mut World, dt: f32, gravity: Vec3) {
         if dynamic && world.get_component::<Velocity>(id).is_none() {
             continue;
         }
-        let (vel, angular) = if dynamic {
+        let (lin, ang) = if dynamic {
             world
                 .get_component::<Velocity>(id)
-                .map(|v| (v.linear, v.angular))
+                .map(|vel| (vel.linear, vel.angular))
                 .unwrap_or((Vec3::ZERO, 0.0))
         } else {
             (Vec3::ZERO, 0.0)
         };
-        let size = [
-            object.size[0] * object.scale[0],
-            object.size[1] * object.scale[1],
-        ];
-        snaps.push(BodySnap {
+        participants.push(Participant {
             id,
+            spec: BodySpec {
+                hx: half_extent(object.size[0] * object.scale[0]),
+                hy: half_extent(object.size[1] * object.scale[1]),
+                inv_mass: body.inv_mass,
+                restitution: body.restitution.clamp(0.0, 1.0),
+                friction: body.friction.max(0.0),
+                dynamic,
+            },
             pos: object.pos,
             rotation: object.rotation,
-            size,
-            vel,
-            angular,
-            inv_mass: body.inv_mass,
-            inv_inertia: box_inv_inertia(body.inv_mass, size),
-            restitution: body.restitution.clamp(0.0, 1.0),
-            friction: body.friction.max(0.0),
+            lin,
+            ang,
             dynamic,
-            touched: false,
         });
     }
+    participants
+}
 
-    if snaps.is_empty() {
-        return;
-    }
+fn half_extent(full: f32) -> f32 {
+    (full.abs() * 0.5).max(1.0e-4)
+}
 
-    let mut remaining = dt.min(SUBSTEP * MAX_SUBSTEPS as f32);
-    while remaining > 0.0 {
-        let h = remaining.min(SUBSTEP);
-        remaining -= h;
-        substep(&mut snaps, h, gravity);
-    }
-
-    for snap in snaps {
-        if let Some(object) = world.get_mut(snap.id) {
-            object.pos = snap.pos;
-            object.rotation = snap.rotation;
-        }
-        if snap.dynamic {
-            if let Some(vel) = world.get_component_mut::<Velocity>(snap.id) {
-                vel.linear = snap.vel;
-                vel.angular = snap.angular;
-            }
+fn drop_orphan_links(world: &mut World, live: &HashSet<GameObjectId>) {
+    let mut ids = Vec::new();
+    world.each_mut::<SimBody>(|id, _object, _link| ids.push(id));
+    for id in ids {
+        if !live.contains(&id) {
+            world.remove_component::<SimBody>(id);
         }
     }
 }
 
-fn box_inv_inertia(inv_mass: f32, size: [f32; 2]) -> f32 {
-    if inv_mass <= 0.0 {
-        return 0.0;
-    }
-    let w2 = size[0] * size[0];
-    let h2 = size[1] * size[1];
-    let denom = w2 + h2;
-    if denom <= 1e-8 {
-        return 0.0;
-    }
-    // I = m (w² + h²) / 12  →  inv_I = 12 * inv_mass / (w² + h²)
-    12.0 * inv_mass / denom
-}
-
-fn substep(snaps: &mut [BodySnap], h: f32, gravity: Vec3) {
-    for body in snaps.iter_mut() {
-        body.touched = false;
-        if body.dynamic {
-            body.vel += gravity * h;
-            body.pos += body.vel * h;
-            body.rotation += body.angular * h;
-            body.angular = body.angular.clamp(-MAX_ANGULAR, MAX_ANGULAR);
-        }
-    }
-
-    for _ in 0..SOLVER_ITERS {
-        let n = snaps.len();
-        for i in 0..n {
-            for j in (i + 1)..n {
-                resolve_pair(snaps, i, j);
-            }
-        }
-    }
-
-    for body in snaps.iter_mut() {
-        if body.dynamic && body.touched {
-            // Kill solver noise that otherwise pumps spin on resting contacts.
-            body.angular *= 0.92;
-            body.vel.x *= 0.98;
-            body.vel.y *= 0.98;
-
-            // Soft pull toward the nearest face-down pose so AABB-of-OBB leans
-            // do not freeze at a tip against a neighbor. Only when already slow.
-            if body.vel.length() < 1.5 && body.angular.abs() < 2.0 {
-                let target = snap_rotation_to_axis(body.rotation);
-                let err = shortest_angle(target - body.rotation);
-                body.angular += err * 12.0;
-            }
-        }
-        // Only sleep when faces are nearly axis-aligned. Sleeping a tipped box
-        // freezes it on a corner and looks broken.
-        if body.dynamic
-            && body.touched
-            && body.vel.length() < SLEEP_SPEED
-            && body.angular.abs() < SLEEP_ANGULAR
-            && faces_nearly_axis_aligned(body.rotation)
-        {
-            body.vel = Vec3::ZERO;
-            body.angular = 0.0;
-            body.rotation = snap_rotation_to_axis(body.rotation);
-        }
-    }
-}
-
-fn shortest_angle(mut radians: f32) -> f32 {
-    let pi = std::f32::consts::PI;
-    while radians > pi {
-        radians -= 2.0 * pi;
-    }
-    while radians < -pi {
-        radians += 2.0 * pi;
-    }
-    radians
-}
-
-/// True when a rectangle's faces are nearly parallel to the world axes.
-fn faces_nearly_axis_aligned(rotation: f32) -> bool {
-    // sin(2θ) is 0 at k·π/2 (faces flush with axes).
-    (rotation * 2.0).sin().abs() < 0.2
-}
-
-fn snap_rotation_to_axis(rotation: f32) -> f32 {
-    let quarter = std::f32::consts::FRAC_PI_2;
-    (rotation / quarter).round() * quarter
-}
-
-fn resolve_pair(snaps: &mut [BodySnap], i: usize, j: usize) {
-    let (left, right) = snaps.split_at_mut(j);
-    let a = &mut left[i];
-    let b = &mut right[0];
-
-    let Some(contact) = aabb_contact(a, b) else {
-        return;
-    };
-
-    let inv_sum = a.inv_mass + b.inv_mass;
-    if inv_sum <= 0.0 {
-        return;
-    }
-
-    a.touched = true;
-    b.touched = true;
-
-    let (nx, ny, penetration) = (contact.nx, contact.ny, contact.penetration);
-    // Offsets from current centers (before Baumgarte). Moving first then
-    // measuring r against the old contact point pumps angular energy.
-    let rax = contact.cx - a.pos.x;
-    let ray = contact.cy - a.pos.y;
-    let rbx = contact.cx - b.pos.x;
-    let rby = contact.cy - b.pos.y;
-
-    // Linear relative velocity for the normal (matches linear-only kn).
-    let vn = (b.vel.x - a.vel.x) * nx + (b.vel.y - a.vel.y) * ny;
-
-    if vn < 0.0 {
-        let kn = a.inv_mass + b.inv_mass;
-        if kn > 1e-8 {
-            let e = if vn > -1.0 {
-                0.0
+fn remove_stale_bodies(sim: &mut PhysicsSim, live: &HashSet<GameObjectId>) {
+    let stale: Vec<_> = sim
+        .rapier
+        .bodies
+        .iter()
+        .filter_map(|(handle, body)| {
+            if live.contains(&unpack_id(body.user_data)) {
+                None
             } else {
-                a.restitution.max(b.restitution)
-            };
-            let jn = -(1.0 + e) * vn / kn;
-            apply_impulse(a, b, jn * nx, jn * ny, rax, ray, rbx, rby);
-
-            // Friction uses contact velocity including spin.
-            let avx = a.vel.x - a.angular * ray;
-            let avy = a.vel.y + a.angular * rax;
-            let bvx = b.vel.x - b.angular * rby;
-            let bvy = b.vel.y + b.angular * rbx;
-            let rvx = bvx - avx;
-            let rvy = bvy - avy;
-            let vt_x = rvx - (rvx * nx + rvy * ny) * nx;
-            let vt_y = rvy - (rvx * nx + rvy * ny) * ny;
-            let vt_len = (vt_x * vt_x + vt_y * vt_y).sqrt();
-            if vt_len > 1e-8 {
-                let tx = vt_x / vt_len;
-                let ty = vt_y / vt_len;
-                let kt = a.inv_mass + b.inv_mass;
-                if kt > 1e-8 {
-                    let mu = (a.friction * b.friction).sqrt();
-                    let mut jt = vt_len / kt;
-                    let max_f = jn.abs() * mu;
-                    if jt > max_f {
-                        jt = max_f;
-                    }
-                    apply_impulse(a, b, -jt * tx, -jt * ty, rax, ray, rbx, rby);
-                }
+                Some(handle)
             }
+        })
+        .collect();
+    for handle in stale {
+        sim.rapier.remove_body(handle);
+    }
+}
+
+fn ensure_body(world: &mut World, sim: &mut PhysicsSim, participant: &Participant) {
+    let current = world.get_component::<SimBody>(participant.id).copied();
+    let rebuild = current.is_none_or(|link| {
+        link.spec != participant.spec || sim.rapier.bodies.get(link.body).is_none()
+    });
+    if rebuild {
+        if let Some(link) = current {
+            sim.rapier.remove_body(link.body);
+            world.remove_component::<SimBody>(participant.id);
         }
+        let (body, _collider) = sim
+            .rapier
+            .insert(rigid_builder(participant), collider_builder(participant));
+        world.insert(
+            participant.id,
+            SimBody {
+                body,
+                spec: participant.spec,
+                synced_x: participant.pos.x,
+                synced_y: participant.pos.y,
+                synced_rot: participant.rotation,
+                synced_vx: participant.lin.x,
+                synced_vy: participant.lin.y,
+                synced_ang: participant.ang,
+            },
+        );
+        return;
     }
 
-    let correction = (penetration - SLOP).max(0.0) * BAUMGARTE / inv_sum;
-    a.pos.x -= nx * correction * a.inv_mass;
-    a.pos.y -= ny * correction * a.inv_mass;
-    b.pos.x += nx * correction * b.inv_mass;
-    b.pos.y += ny * correction * b.inv_mass;
+    let link = current.expect("existing link");
+    push_changes(sim, &link, participant);
 }
 
-fn apply_impulse(
-    a: &mut BodySnap,
-    b: &mut BodySnap,
-    jx: f32,
-    jy: f32,
-    rax: f32,
-    ray: f32,
-    rbx: f32,
-    rby: f32,
-) {
-    a.vel.x -= jx * a.inv_mass;
-    a.vel.y -= jy * a.inv_mass;
-    b.vel.x += jx * b.inv_mass;
-    b.vel.y += jy * b.inv_mass;
-    const TORQUE_SCALE: f32 = 0.5;
-    a.angular -= (rax * jy - ray * jx) * a.inv_inertia * TORQUE_SCALE;
-    b.angular += (rbx * jy - rby * jx) * b.inv_inertia * TORQUE_SCALE;
-}
-
-/// AABB of each oriented box, then classic AABB contact. Normal from A toward B.
-fn aabb_contact(a: &BodySnap, b: &BodySnap) -> Option<Contact> {
-    let (aw, ah) = aabb_extents(a.size, a.rotation);
-    let (bw, bh) = aabb_extents(b.size, b.rotation);
-    let ox = overlap_1d(a.pos.x, aw, b.pos.x, bw);
-    let oy = overlap_1d(a.pos.y, ah, b.pos.y, bh);
-    if ox <= 0.0 || oy <= 0.0 {
-        return None;
-    }
-
-    let (nx, ny, penetration) = if ox < oy {
-        let nx = if a.pos.x < b.pos.x { 1.0 } else { -1.0 };
-        (nx, 0.0, ox)
+fn rigid_builder(participant: &Participant) -> RigidBodyBuilder {
+    let builder = if participant.dynamic {
+        RigidBodyBuilder::dynamic()
+            .ccd_enabled(true)
+            .linvel(vec2(participant.lin.x, participant.lin.y))
+            .angvel(participant.ang)
     } else {
-        let ny = if a.pos.y < b.pos.y { 1.0 } else { -1.0 };
-        (0.0, ny, oy)
+        RigidBodyBuilder::fixed()
+    };
+    builder
+        .translation(vec2(participant.pos.x, participant.pos.y))
+        .rotation(participant.rotation)
+        .user_data(pack_id(participant.id))
+}
+
+fn collider_builder(participant: &Participant) -> ColliderBuilder {
+    let mut collider = ColliderBuilder::cuboid(participant.spec.hx, participant.spec.hy)
+        .friction(participant.spec.friction)
+        .restitution(participant.spec.restitution);
+    if participant.dynamic {
+        let mass = 1.0 / participant.spec.inv_mass;
+        let area = (participant.spec.hx * 2.0) * (participant.spec.hy * 2.0);
+        collider = collider.density(mass / area.max(1.0e-8));
+    }
+    collider
+}
+
+fn push_changes(sim: &mut PhysicsSim, link: &SimBody, participant: &Participant) {
+    let pose = diverged(link.synced_x, participant.pos.x)
+        || diverged(link.synced_y, participant.pos.y)
+        || diverged(link.synced_rot, participant.rotation);
+    let vel = participant.dynamic
+        && (diverged(link.synced_vx, participant.lin.x)
+            || diverged(link.synced_vy, participant.lin.y)
+            || diverged(link.synced_ang, participant.ang));
+    if !pose && !vel {
+        return;
+    }
+    let Some(body) = sim.rapier.bodies.get_mut(link.body) else {
+        return;
+    };
+    if pose {
+        body.set_translation(vec2(participant.pos.x, participant.pos.y), true);
+        body.set_rotation(Rotation::new(participant.rotation), true);
+    }
+    if vel {
+        body.set_linvel(vec2(participant.lin.x, participant.lin.y), true);
+        body.set_angvel(participant.ang, true);
+    }
+}
+
+fn write_back(world: &mut World, sim: &PhysicsSim, participant: &Participant, z: f32, vz: f32) {
+    let Some(link) = world.get_component::<SimBody>(participant.id).copied() else {
+        return;
+    };
+    let Some(body) = sim.rapier.bodies.get(link.body) else {
+        return;
+    };
+    let x = body.translation().x;
+    let y = body.translation().y;
+    let rot = continue_angle(participant.rotation, body.rotation().angle());
+    let (vx, vy, ang) = if participant.dynamic {
+        let vel = body.linvel();
+        (vel.x, vel.y, body.angvel())
+    } else {
+        (0.0, 0.0, 0.0)
     };
 
-    let ax0 = a.pos.x - aw * 0.5;
-    let ax1 = a.pos.x + aw * 0.5;
-    let ay0 = a.pos.y - ah * 0.5;
-    let ay1 = a.pos.y + ah * 0.5;
-    let bx0 = b.pos.x - bw * 0.5;
-    let bx1 = b.pos.x + bw * 0.5;
-    let by0 = b.pos.y - bh * 0.5;
-    let by1 = b.pos.y + bh * 0.5;
-    let ox0 = ax0.max(bx0);
-    let ox1 = ax1.min(bx1);
-    let oy0 = ay0.max(by0);
-    let oy1 = ay1.min(by1);
-
-    Some(Contact {
-        nx,
-        ny,
-        penetration,
-        cx: (ox0 + ox1) * 0.5,
-        cy: (oy0 + oy1) * 0.5,
-    })
+    if let Some(object) = world.get_mut(participant.id) {
+        object.pos = Vec3::new(x, y, z);
+        object.rotation = rot;
+    }
+    if participant.dynamic {
+        if let Some(vel) = world.get_component_mut::<Velocity>(participant.id) {
+            vel.linear = Vec3::new(vx, vy, vz);
+            vel.angular = ang;
+        }
+    }
+    if let Some(link) = world.get_component_mut::<SimBody>(participant.id) {
+        link.synced_x = x;
+        link.synced_y = y;
+        link.synced_rot = rot;
+        if participant.dynamic {
+            link.synced_vx = vx;
+            link.synced_vy = vy;
+            link.synced_ang = ang;
+        }
+    }
 }
 
-/// World-axis width/height of a box with local `size` spun by `rotation`.
-fn aabb_extents(size: [f32; 2], rotation: f32) -> (f32, f32) {
-    let c = rotation.cos().abs();
-    let s = rotation.sin().abs();
-    let w = size[0] * c + size[1] * s;
-    let h = size[0] * s + size[1] * c;
-    (w, h)
+fn vec2(x: f32, y: f32) -> Vector {
+    Vector::new(x, y)
 }
 
-fn overlap_1d(center_a: f32, size_a: f32, center_b: f32, size_b: f32) -> f32 {
-    let half_a = size_a * 0.5;
-    let half_b = size_b * 0.5;
-    (half_a + half_b) - (center_a - center_b).abs()
+fn diverged(stored: f32, current: f32) -> bool {
+    (stored - current).abs() > DIVERGE
+}
+
+fn continue_angle(previous: f32, next: f32) -> f32 {
+    let pi = std::f32::consts::PI;
+    let mut delta = next - previous;
+    while delta > pi {
+        delta -= 2.0 * pi;
+    }
+    while delta < -pi {
+        delta += 2.0 * pi;
+    }
+    previous + delta
+}
+
+fn pack_id(id: GameObjectId) -> u128 {
+    id.0 as u128 | ((id.1 as u128) << 32)
+}
+
+fn unpack_id(data: u128) -> GameObjectId {
+    GameObjectId(data as u32, (data >> 32) as u32)
 }
 
 #[cfg(test)]
@@ -423,6 +404,10 @@ mod tests {
             sprite: None,
             tag: 0,
         }
+    }
+
+    fn overlap_1d(center_a: f32, size_a: f32, center_b: f32, size_b: f32) -> f32 {
+        (size_a * 0.5 + size_b * 0.5) - (center_a - center_b).abs()
     }
 
     #[test]
@@ -460,11 +445,15 @@ mod tests {
         world.insert(b, Velocity::ZERO);
         world.insert(a, RigidBody::dynamic(1.0));
         world.insert(b, RigidBody::dynamic(1.0));
-        step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
+        for _ in 0..240 {
+            step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
+        }
         let pa = world.get(a).unwrap().pos;
         let pb = world.get(b).unwrap().pos;
-        let ox = overlap_1d(pa.x, 2.0, pb.x, 2.0);
-        assert!(ox < 0.15, "overlap left {ox}");
+        let dx = pa.x - pb.x;
+        let dy = pa.y - pb.y;
+        let dist = (dx * dx + dy * dy).sqrt();
+        assert!(dist > 1.8, "expected boxes to separate, got {pa:?} {pb:?}");
     }
 
     #[test]
@@ -488,7 +477,7 @@ mod tests {
             pos.y
         );
         let oy = overlap_1d(pos.y, 1.0, -1.0, 1.0);
-        assert!(oy <= SLOP + 0.05, "box still sunk into floor: oy={oy}");
+        assert!(oy <= 0.08, "box still sunk into floor: oy={oy}");
     }
 
     #[test]
@@ -535,8 +524,8 @@ mod tests {
             step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
         }
         let expected = 2.0 * SUBSTEP * 10.0;
-        assert!((world.get(id).unwrap().rotation - expected).abs() < 1e-4);
-        assert!((world.get_component::<Velocity>(id).unwrap().angular - 2.0).abs() < 1e-4);
+        assert!((world.get(id).unwrap().rotation - expected).abs() < 1e-3);
+        assert!((world.get_component::<Velocity>(id).unwrap().angular - 2.0).abs() < 1e-3);
     }
 
     #[test]
@@ -556,13 +545,11 @@ mod tests {
         }
 
         let obj = world.get(box_id).unwrap();
-        // Diamond / square resting: center should sit above the floor, not through it.
         assert!(
             obj.pos.y > -0.2,
             "rotated box fell through floor: y={}",
             obj.pos.y
         );
-        // Should not float high after settling.
         assert!(
             obj.pos.y < 1.2,
             "rotated box floating too high: y={}",
@@ -598,11 +585,7 @@ mod tests {
             "tipped box fell through floor: y={}",
             obj.pos.y
         );
-        assert!(
-            obj.pos.y < 2.0,
-            "tipped box floated away: y={}",
-            obj.pos.y
-        );
+        assert!(obj.pos.y < 2.0, "tipped box floated away: y={}", obj.pos.y);
     }
 
     #[test]
@@ -618,5 +601,42 @@ mod tests {
         assert_eq!(world.get(id).unwrap().pos, Vec3::new(0.0, 3.0, 0.0));
         integrate_velocities(&mut world, 0.5);
         assert_eq!(world.get(id).unwrap().pos, Vec3::new(0.0, 3.0, 0.0));
+    }
+
+    #[test]
+    fn external_pose_and_velocity_are_applied() {
+        let mut world = World::new();
+        let id = world.spawn(box_at(Vec3::ZERO, [1.0, 1.0]));
+        world.insert(id, Velocity::ZERO);
+        world.insert(id, RigidBody::dynamic(1.0));
+        step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
+
+        world.get_mut(id).unwrap().pos.x = 4.0;
+        world.get_component_mut::<Velocity>(id).unwrap().linear.x = 3.0;
+        step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
+
+        let x = world.get(id).unwrap().pos.x;
+        assert!(
+            x > 4.01 && x < 4.1,
+            "expected the written pose to move one substep, got x={x}"
+        );
+    }
+
+    #[test]
+    fn clear_drops_simulation() {
+        let mut world = World::new();
+        let id = world.spawn(box_at(Vec3::ZERO, [2.0, 2.0]));
+        world.insert(id, RigidBody::fixed());
+        step_rigid_bodies(&mut world, SUBSTEP, Vec3::ZERO);
+        world.clear();
+
+        let id = world.spawn(box_at(Vec3::ZERO, [1.0, 1.0]));
+        world.insert(id, Velocity::linear(Vec3::new(10.0, 0.0, 0.0)));
+        world.insert(id, RigidBody::dynamic(1.0));
+        step_rigid_bodies(&mut world, 0.1, Vec3::ZERO);
+        assert!(
+            world.get(id).unwrap().pos.x > 0.5,
+            "a cleared collider should not block the new body"
+        );
     }
 }

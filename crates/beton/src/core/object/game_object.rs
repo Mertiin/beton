@@ -26,7 +26,7 @@ pub struct GameObject {
     pub scale: [f32; 2],
     /// Parent in the transform hierarchy.
     pub parent: Option<GameObjectId>,
-    /// Unscaled axis-aligned hit size in XY. Collision uses `size * world_scale`.
+    /// Unscaled cuboid width and height. Physics uses `size * scale` as an oriented box.
     pub size: [f32; 2],
     /// Drawn at the resolved world pose each frame when `Some`.
     pub sprite: Option<Sprite>,

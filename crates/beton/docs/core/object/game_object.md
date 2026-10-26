@@ -24,7 +24,7 @@ The two fields are `pub(crate)`. Games treat the id as an opaque `Copy` value: s
 | `rotation` | **Local** radians |
 | `scale` | **Local** XY scale, default `[1.0, 1.0]` |
 | `parent` | Optional parent id. Prefer [`World::set_parent`](world.md) so cycles are rejected |
-| `size` | Unscaled hitbox width and height. Collision uses `size * world_scale` |
+| `size` | Unscaled cuboid width and height. Physics uses `size * scale` as an oriented box. `aabb_overlaps` ignores rotation |
 | `sprite` | If `Some`, drawn at the resolved **world** pose each frame |
 | `tag` | Your classification integer (bird = 1, pipe = 2, …) |
 
@@ -70,5 +70,5 @@ Most games should call [`World::overlaps`](world.md) instead. That helper resolv
 - [world.md](world.md) — spawn, parents, `overlaps`
 - [component.md](component.md) — data that is not a field
 - [velocity.md](velocity.md) — shared linear speed
-- [rigid.md](rigid.md) — mass and AABB contacts
+- [rigid.md](rigid.md) — mass and Rapier contacts
 - [../scene.md](../scene.md) — what `sprite` points at

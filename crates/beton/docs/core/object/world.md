@@ -23,7 +23,7 @@ free:  Vec<slot index>
 
 `despawn` collects current children and despawns them first, then the object itself. Grandchildren go with them. Components on every removed id are dropped.
 
-`clear` drops every slot, the free list, and every component store.
+`clear` drops every slot, the free list, every component store, and the rigid-body simulation. The next spawn starts at generation 0, so the simulation has to go too or a new object would reuse a stale Rapier body.
 
 `children(id)` is “live objects whose `parent` is this id,” not a stored child array. Order follows slot order.
 

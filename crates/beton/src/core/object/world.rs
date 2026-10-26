@@ -4,6 +4,7 @@ use crate::core::math::Vec3;
 
 use super::component::{ComponentMap, Query};
 use super::game_object::{GameObject, GameObjectId};
+use super::rigid::PhysicsSim;
 
 #[derive(Clone)]
 pub(super) struct Slot {
@@ -17,6 +18,8 @@ pub struct World {
     pub(super) slots: Vec<Slot>,
     free: Vec<u32>,
     pub(super) components: ComponentMap,
+    /// Rapier simulation used by [`super::rigid::step_rigid_bodies`].
+    pub(super) physics: PhysicsSim,
 }
 
 impl World {
@@ -201,11 +204,12 @@ impl World {
             })
     }
 
-    /// Remove every game object and every component.
+    /// Remove every game object, every component, and the rigid-body simulation.
     pub fn clear(&mut self) {
         self.slots.clear();
         self.free.clear();
         self.components.clear_all();
+        self.physics = PhysicsSim::default();
     }
 
     /// Direct children of `id`.

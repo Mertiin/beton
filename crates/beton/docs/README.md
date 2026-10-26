@@ -62,7 +62,7 @@ One markdown file per source file. A module that is only `mod.rs` keeps a single
 | 9 | [core/object/world.md](core/object/world.md) | `src/core/object/world.rs` | Spawn, parents, poses |
 | 10 | [core/object/component.md](core/object/component.md) | `src/core/object/component.rs` | Sparse sets and `Query` |
 | 11 | [core/object/velocity.md](core/object/velocity.md) | `src/core/object/velocity.rs` | Shared linear speed + integrator |
-| 12 | [core/object/rigid.md](core/object/rigid.md) | `src/core/object/rigid.rs` | Rigid body material + AABB step |
+| 12 | [core/object/rigid.md](core/object/rigid.md) | `src/core/object/rigid.rs` | Rigid body material + Rapier step |
 | 13 | [core/scene.md](core/scene.md) | `src/core/scene/mod.rs` | Sprites, fonts, one-frame draw list |
 | 14 | [core/camera.md](core/camera.md) | `src/core/camera/mod.rs` | How world space maps into the window |
 | 15 | [core/input.md](core/input.md) | `src/core/input/mod.rs` | Keys held / pressed, cursor |
