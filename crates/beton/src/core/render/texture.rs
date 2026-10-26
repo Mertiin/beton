@@ -64,6 +64,8 @@ struct TextureSlot {
     generation: u32,
     life: AssetLifetime,
     resident: Option<GpuTexture>,
+    /// Cached pixel size for path sources (header read without a full upload).
+    cached_size: Option<(u32, u32)>,
 }
 
 /// Loads and creates textures. Opaque to game code beyond its methods.
@@ -75,6 +77,8 @@ pub struct Gfx {
     slots: Vec<TextureSlot>,
     by_path: HashMap<PathBuf, TextureId>,
     files: Option<FileBytes>,
+    /// 1×1 white pixel, pinned for UI backgrounds and solid rects.
+    white: TextureHandle,
 }
 
 impl Gfx {
@@ -84,7 +88,7 @@ impl Gfx {
         format: wgpu::TextureFormat,
         bind_group_layout: wgpu::BindGroupLayout,
     ) -> Self {
-        Self {
+        let mut gfx = Self {
             device,
             queue,
             format,
@@ -92,12 +96,36 @@ impl Gfx {
             slots: Vec::new(),
             by_path: HashMap::new(),
             files: None,
-        }
+            // Placeholder replaced immediately below.
+            white: TextureHandle {
+                id: TextureId::from_raw(0),
+                _pin: Arc::new(()),
+            },
+        };
+        let white_id = gfx
+            .create_texture(1, 1, &[255, 255, 255, 255])
+            .expect("white texture");
+        gfx.white = gfx.pin(white_id).expect("pin white texture");
+        gfx
+    }
+
+    /// 1×1 white texture for tinted rects and UI backgrounds.
+    pub fn white_texture(&self) -> TextureId {
+        self.white.id()
     }
 
     /// Attach bytes preloaded by the app (from [`Game::assets`](crate::Game::assets)).
     pub(crate) fn install_files(&mut self, files: FileBytes) {
         self.files = Some(files);
+    }
+
+    /// Read a preloaded asset path, or the filesystem on desktop.
+    pub fn read_bytes(&self, path: &Path) -> Result<Vec<u8>, String> {
+        let path = path.to_path_buf();
+        if let Some(bytes) = self.files.as_ref().and_then(|f| f.get(&path).cloned()) {
+            return Ok(bytes);
+        }
+        std::fs::read(&path).map_err(|err| format!("failed to read {}: {err}", path.display()))
     }
 
     /// Register a PNG or JPEG path. Checks that the file exists; does not decode yet.
@@ -244,14 +272,48 @@ impl Gfx {
             .sum()
     }
 
-    /// Pixel size of a resident texture, or `(0, 0)` if unloaded or unknown.
-    pub fn texture_size(&self, id: TextureId) -> (u32, u32) {
-        self.slots
-            .get(id.index() as usize)
-            .filter(|s| s.generation == id.generation())
-            .and_then(|s| s.resident.as_ref())
-            .map(|t| (t.width, t.height))
-            .unwrap_or((0, 0))
+    /// Pixel size of a texture, or `(0, 0)` if unknown.
+    ///
+    /// Prefers the resident GPU size, then RGBA source dimensions, then a cached
+    /// path header read (without uploading).
+    pub fn texture_size(&mut self, id: TextureId) -> (u32, u32) {
+        let Some(slot) = self.slots.get(id.index() as usize) else {
+            return (0, 0);
+        };
+        if slot.generation != id.generation() {
+            return (0, 0);
+        }
+        if let Some(gpu) = slot.resident.as_ref() {
+            return (gpu.width, gpu.height);
+        }
+        match &slot.source {
+            TextureSource::Rgba { width, height, .. } => (*width, *height),
+            TextureSource::Path(_) => {
+                if let Some(size) = slot.cached_size {
+                    return size;
+                }
+                let size = self.read_path_size(id.index() as usize);
+                if let Some(slot) = self.slots.get_mut(id.index() as usize) {
+                    slot.cached_size = size;
+                }
+                size.unwrap_or((0, 0))
+            }
+        }
+    }
+
+    fn read_path_size(&self, index: usize) -> Option<(u32, u32)> {
+        let path = match &self.slots.get(index)?.source {
+            TextureSource::Path(path) => path.clone(),
+            TextureSource::Rgba { .. } => return None,
+        };
+        if let Some(bytes) = self.files.as_ref().and_then(|f| f.get(&path)) {
+            return image::ImageReader::new(std::io::Cursor::new(bytes.as_slice()))
+                .with_guessed_format()
+                .ok()?
+                .into_dimensions()
+                .ok();
+        }
+        image::image_dimensions(&path).ok()
     }
 
     pub(crate) fn bind_group(&self, id: TextureId) -> Option<&wgpu::BindGroup> {
@@ -263,12 +325,17 @@ impl Gfx {
     }
 
     fn alloc_slot(&mut self, source: TextureSource) -> TextureId {
+        let cached_size = match &source {
+            TextureSource::Rgba { width, height, .. } => Some((*width, *height)),
+            TextureSource::Path(_) => None,
+        };
         let index = self.slots.len() as u32;
         self.slots.push(TextureSlot {
             source,
             generation: 0,
             life: AssetLifetime::new(),
             resident: None,
+            cached_size,
         });
         TextureId(index, 0)
     }
@@ -296,6 +363,7 @@ impl Gfx {
         )?;
         let gpu = self.upload_rgba(width, height, &bytes)?;
         self.slots[index].resident = Some(gpu);
+        self.slots[index].cached_size = Some((width, height));
         self.slots[index].life.mark_resident();
         Ok(())
     }

@@ -23,3 +23,6 @@ pub use core::object::{
 pub use core::object::{step_rigid_bodies, RigidBody};
 pub use core::render::{Gfx, TextureHandle, TextureId};
 pub use core::scene::{Font, Scene, Sprite};
+pub use core::ui::{
+    Align, Direction, Display, Fit, Justify, Size, Style, Ui, UiId,
+};

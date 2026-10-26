@@ -37,8 +37,9 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | `core::app` | Window, clock, `Game` loop | yes — `run`, `Config`, `Context`, `Game` |
 | `core::object` | Retained game objects + components | yes — `GameObject`, `GameObjectId`, `World`, `Query`, `Velocity`, and with `physics`: `RigidBody`, steppers |
 | `core::scene` | One-frame sprites + text | yes — `Sprite`, `Font`, `Scene` |
+| `core::ui` | Screen-fixed layout UI | yes — `Ui`, `UiId`, `Style`, layout enums |
 | `core::camera` | View into the world | yes — `Camera`, `Projection` |
-| `core::input` | Keyboard snapshot | yes — `Input`, `Key` |
+| `core::input` | Keyboard and pointer snapshot | yes — `Input`, `Key` |
 | `core::net` | Host / client messages | yes — `Net`, `NetEvent`, `NetRole`, `PeerId`, caps |
 | `core::anim` | Sheets + clips | yes — `SpriteSheet`, `Animation` |
 | `core::audio` | Sound register + playback | yes — `Audio`, `SoundId`, `SoundHandle`, `VoiceId` |
@@ -56,13 +57,14 @@ Without this file, callers would import deep paths like `beton::core::render::te
 | `Context` | Per-frame handles (`dt`, `world`, `scene`, …) |
 | `Game` | Trait you implement (`boot` + `update`) |
 | `Camera`, `Projection` | Where you look from / how it projects |
-| `Input`, `Key` | Held keys and “just pressed” edges |
+| `Input`, `Key` | Held keys, pointer, and “just pressed” edges |
 | `Net`, `NetEvent`, `NetRole`, `PeerId` | LAN WebSocket channel (opaque bytes) |
 | `MAX_PAYLOAD`, `MAX_PEERS` | Net send / accept caps |
 | `Vec3`, `Mat4`, `Rng` | Math helpers |
 | `Gfx`, `TextureId`, `TextureHandle` | Register / pin textures |
 | `Audio`, `SoundId`, `SoundHandle`, `VoiceId` | Register / pin / play clips |
 | `Sprite`, `Font`, `Scene` | Drawing primitives |
+| `Ui`, `UiId`, `Style`, `Size`, … | Screen UI layout and hit-testing |
 | `GameObject`, `GameObjectId`, `World`, `Query` | Entities and components |
 | `Velocity`, `integrate_velocities` | Shared linear + angular speed; plain integrate |
 | `RigidBody`, `step_rigid_bodies` | `physics` feature. Mass / material; Rapier cuboid gravity and contacts |

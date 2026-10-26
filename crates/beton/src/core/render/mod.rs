@@ -32,11 +32,13 @@ pub(crate) struct Renderer {
     pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
+    ui_camera_buffer: wgpu::Buffer,
+    ui_camera_bind_group: wgpu::BindGroup,
     /// Static unit quad (4 corners).
     quad_vertex_buffer: wgpu::Buffer,
     /// Static indices for one quad (6).
     quad_index_buffer: wgpu::Buffer,
-    /// Dynamic per-sprite instance data.
+    /// Dynamic per-sprite instance data (world, then UI appended).
     instance_buffer: wgpu::Buffer,
     instance_capacity: u64,
     depth_view: wgpu::TextureView,
@@ -265,6 +267,20 @@ impl Renderer {
                 resource: camera_buffer.as_entire_binding(),
             }],
         });
+        let ui_camera_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ui-camera"),
+            size: 64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let ui_camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("ui-camera"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: ui_camera_buffer.as_entire_binding(),
+            }],
+        });
 
         // Unit quad: top-left, top-right, bottom-right, bottom-left (Y-up, v=0 at top).
         let unit_quad: [f32; 16] = [
@@ -319,6 +335,8 @@ impl Renderer {
                 pipeline,
                 camera_buffer,
                 camera_bind_group,
+                ui_camera_buffer,
+                ui_camera_bind_group,
                 quad_vertex_buffer,
                 quad_index_buffer,
                 instance_buffer,
@@ -350,6 +368,8 @@ impl Renderer {
         &mut self,
         view_proj: Mat4,
         sprites: &[Sprite],
+        ui_view_proj: Mat4,
+        ui_sprites: &[Sprite],
         gfx: &Gfx,
     ) -> Result<(), FrameError> {
         let frame = match self.surface.get_current_texture() {
@@ -366,8 +386,14 @@ impl Renderer {
 
         self.queue
             .write_buffer(&self.camera_buffer, 0, view_proj.as_bytes());
+        self.queue
+            .write_buffer(&self.ui_camera_buffer, 0, ui_view_proj.as_bytes());
 
-        let (floats, ranges) = pack_instances(sprites);
+        let (world_floats, world_ranges) = pack_instances(sprites);
+        let (ui_floats, ui_ranges) = pack_instances(ui_sprites);
+        let world_count = (world_floats.len() / FLOATS_PER_INSTANCE) as u32;
+        let mut floats = world_floats;
+        floats.extend_from_slice(&ui_floats);
         let byte_len = (floats.len() * std::mem::size_of::<f32>()) as u64;
         if byte_len > self.instance_capacity {
             let new_cap = byte_len.next_power_of_two().max(64);
@@ -428,12 +454,52 @@ impl Renderer {
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-            for (texture, start, count) in ranges {
+            for (texture, start, count) in world_ranges {
                 let Some(bind_group) = gfx.bind_group(texture) else {
                     continue;
                 };
                 pass.set_bind_group(1, bind_group, &[]);
                 pass.draw_indexed(0..6, 0, start..(start + count));
+            }
+        }
+
+        if !ui_sprites.is_empty() {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("ui"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.pipeline);
+            pass.set_bind_group(0, &self.ui_camera_bind_group, &[]);
+            pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
+            pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
+            pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+
+            for (texture, start, count) in ui_ranges {
+                let Some(bind_group) = gfx.bind_group(texture) else {
+                    continue;
+                };
+                pass.set_bind_group(1, bind_group, &[]);
+                let offset_start = world_count + start;
+                pass.draw_indexed(0..6, 0, offset_start..(offset_start + count));
             }
         }
 

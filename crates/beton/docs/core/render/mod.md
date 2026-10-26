@@ -97,7 +97,17 @@ draw_indexed(0..6, 0, start..start+count)   // 1 quad × N instances
 
 Missing textures are skipped.
 
-### 7. Submit + present
+### 7. Optional UI pass
+
+If the frame has UI sprites, a **second** render pass runs with:
+
+- Color and depth **load** (nothing cleared)
+- A separate UI camera uniform / bind group (pixel orthographic)
+- Instance data packed after the world sprites in the same buffer
+
+UI is always drawn on top of the world. See [ui.md](../ui.md).
+
+### 8. Submit + present
 
 ```text
 queue.submit(command_buffer)
@@ -127,11 +137,11 @@ On window resize, `resize` reconfigures the surface and recreates the depth buff
 
 ```text
 Game::update
-    → pushes Sprites (scene + world copies)
-Scene::take_sorted (by Z)
+    → pushes Sprites (scene + world copies) and builds Ui
+Scene::take_sorted (by Z); Ui::layout → UI sprites
     → Renderer::render
-        → pack_instances → instance buffer
-        → shader.wgsl places unit-quad corners & samples
+        → world pass (clear + game camera)
+        → UI pass (load + pixel camera), if any
         → present to window
 ```
 

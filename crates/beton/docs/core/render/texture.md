@@ -26,7 +26,11 @@ Holding only a `TextureId` in your game struct does **not** keep the texture loa
 
 `from_raw(index)` builds generation 0 (tests). Prefer ids from `Gfx`.
 
-A stale or unloaded id makes the renderer **skip** that sprite (`bind_group` is `None`). `texture_size` returns `(0, 0)`.
+A stale id makes the renderer **skip** that sprite (`bind_group` is `None`).
+
+`texture_size(id)` returns pixel size from the resident GPU texture, else RGBA source dimensions, else a cached path header read (no upload). Unknown → `(0, 0)`. UI layout uses this for `Contain` / `Cover`.
+
+`white_texture()` is a pinned 1×1 white pixel created at `Gfx::new`, used for tinted rects and UI backgrounds.
 
 ## `Gfx::load_texture(path)`
 

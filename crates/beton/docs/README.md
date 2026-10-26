@@ -14,6 +14,7 @@ That translation has three layers:
 |-------|---------------|--------------|
 | Gameplay | “the bird is here, pipes move left” | `World`, `GameObject`, components, `Input`, `Animation` |
 | Presentation | “draw this image here, this big, this tint” | `Scene`, `Sprite`, `Font`, `Camera` |
+| Screen UI | “layout this panel in pixels, click this button” | `Ui`, `UiId`, `Style` |
 | Audio | “play this clip once / looped” | `Audio`, `SoundId`, `SoundHandle`, `VoiceId` |
 | GPU | “upload buffers, run shaders, present” | `Gfx`, `Renderer`, `shader.wgsl` (mostly hidden) |
 
@@ -64,19 +65,20 @@ One markdown file per source file. A module that is only `mod.rs` keeps a single
 | 11 | [core/object/velocity.md](core/object/velocity.md) | `src/core/object/velocity.rs` | Shared linear speed + integrator |
 | 12 | [core/object/rigid.md](core/object/rigid.md) | `src/core/object/rigid.rs` | Rigid body material + Rapier step |
 | 13 | [core/scene.md](core/scene.md) | `src/core/scene/mod.rs` | Sprites, fonts, one-frame draw list |
-| 14 | [core/camera.md](core/camera.md) | `src/core/camera/mod.rs` | How world space maps into the window |
-| 15 | [core/input.md](core/input.md) | `src/core/input/mod.rs` | Keys held / pressed, cursor |
-| 16 | [core/net.md](core/net.md) | `src/core/net/mod.rs` | Host / client WebSocket messages |
-| 17 | [core/anim.md](core/anim.md) | `src/core/anim/mod.rs` | Sprite sheets and frame clips |
-| 18 | [core/audio.md](core/audio.md) | `src/core/audio/mod.rs` | Register clips, play / pin / resolve |
-| 19 | [core/asset.md](core/asset.md) | `src/core/asset.rs` | Shared load / grace / unload rules |
-| 20 | [core/math/vec3.md](core/math/vec3.md) | `src/core/math/vec3.rs` | Positions and directions |
-| 21 | [core/math/mat4.md](core/math/mat4.md) | `src/core/math/mat4.rs` | Camera matrices |
-| 22 | [core/math/rng.md](core/math/rng.md) | `src/core/math/rng.rs` | Tiny random numbers |
-| 23 | [core/math/mod.md](core/math/mod.md) | `src/core/math/mod.rs` | Math module glue |
-| 24 | [core/render/texture.md](core/render/texture.md) | `src/core/render/texture.rs` | Register / pin / resolve textures |
-| 25 | [core/render/mod.md](core/render/mod.md) | `src/core/render/mod.rs` | The renderer (internal) |
-| 26 | [core/render/shader.md](core/render/shader.md) | `src/core/render/shader.wgsl` | GPU vertex + fragment programs |
+| 14 | [core/ui.md](core/ui.md) | `src/core/ui/mod.rs` | Screen-fixed layout UI |
+| 15 | [core/camera.md](core/camera.md) | `src/core/camera/mod.rs` | How world space maps into the window |
+| 16 | [core/input.md](core/input.md) | `src/core/input/mod.rs` | Keys held / pressed, cursor, pointer |
+| 17 | [core/net.md](core/net.md) | `src/core/net/mod.rs` | Host / client WebSocket messages |
+| 18 | [core/anim.md](core/anim.md) | `src/core/anim/mod.rs` | Sprite sheets and frame clips |
+| 19 | [core/audio.md](core/audio.md) | `src/core/audio/mod.rs` | Register clips, play / pin / resolve |
+| 20 | [core/asset.md](core/asset.md) | `src/core/asset.rs` | Shared load / grace / unload rules |
+| 21 | [core/math/vec3.md](core/math/vec3.md) | `src/core/math/vec3.rs` | Positions and directions |
+| 22 | [core/math/mat4.md](core/math/mat4.md) | `src/core/math/mat4.rs` | Camera matrices |
+| 23 | [core/math/rng.md](core/math/rng.md) | `src/core/math/rng.rs` | Tiny random numbers |
+| 24 | [core/math/mod.md](core/math/mod.md) | `src/core/math/mod.rs` | Math module glue |
+| 25 | [core/render/texture.md](core/render/texture.md) | `src/core/render/texture.rs` | Register / pin / resolve textures |
+| 26 | [core/render/mod.md](core/render/mod.md) | `src/core/render/mod.rs` | The renderer (internal) |
+| 27 | [core/render/shader.md](core/render/shader.md) | `src/core/render/shader.wgsl` | GPU vertex + fragment programs |
 
 ## Glossary
 

@@ -11,13 +11,15 @@ use winit::keyboard::{Key, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use crate::core::audio::Audio;
-use crate::core::camera::Camera;
+use crate::core::camera::{Camera, Projection};
 use crate::core::input::Input;
+use crate::core::math::Vec3;
 use crate::core::net::Net;
 use crate::core::object::World;
 use crate::core::platform::{self, Duration, Instant};
 use crate::core::render::{FrameError, Gfx, Renderer};
 use crate::core::scene::Scene;
+use crate::core::ui::Ui;
 
 /// Window title, size, and frame pacing at startup.
 #[derive(Clone, Debug)]
@@ -64,6 +66,8 @@ pub struct Context<'a> {
     pub world: &'a mut World,
     /// Immediate sprites for this frame.
     pub scene: &'a mut Scene,
+    /// Screen-fixed UI for this frame.
+    pub ui: &'a mut Ui,
     /// Active camera.
     pub camera: &'a mut Camera,
 }
@@ -126,6 +130,7 @@ pub fn run(config: Config, game: impl Game + 'static) -> Result<(), String> {
         net: Net::new(),
         world: World::new(),
         scene: Scene::default(),
+        ui: Ui::default(),
         camera: Camera::default(),
         start: now,
         last: now,
@@ -157,6 +162,7 @@ struct EngineApp<G: Game> {
     net: Net,
     world: World,
     scene: Scene,
+    ui: Ui,
     camera: Camera,
     start: Instant,
     last: Instant,
@@ -244,6 +250,7 @@ impl<G: Game> EngineApp<G> {
             })
             .unwrap_or([1.0, 1.0]);
         self.net.begin_frame();
+        self.ui.begin_frame([0.0, 0.0], false, false);
         let mut ctx = Context {
             dt: 0.0,
             time: 0.0,
@@ -254,6 +261,7 @@ impl<G: Game> EngineApp<G> {
             audio: &mut self.audio,
             world: &mut self.world,
             scene: &mut self.scene,
+            ui: &mut self.ui,
             camera: &mut self.camera,
         };
         self.game.boot(&mut ctx);
@@ -283,16 +291,21 @@ impl<G: Game> EngineApp<G> {
 
         self.scene.clear();
         self.net.begin_frame();
+        self.ui.begin_frame(
+            self.input.cursor_px(),
+            self.input.cursor_inside(),
+            self.input.pointer_pressed(),
+        );
 
+        let fb_size = self
+            .window
+            .as_ref()
+            .map(|w| {
+                let s = w.inner_size();
+                [s.width as f32, s.height as f32]
+            })
+            .unwrap_or([1.0, 1.0]);
         {
-            let fb_size = self
-                .window
-                .as_ref()
-                .map(|w| {
-                    let s = w.inner_size();
-                    [s.width as f32, s.height as f32]
-                })
-                .unwrap_or([1.0, 1.0]);
             let gfx = self.gfx.as_mut().unwrap();
             let mut ctx = Context {
                 dt,
@@ -304,6 +317,7 @@ impl<G: Game> EngineApp<G> {
                 audio: &mut self.audio,
                 world: &mut self.world,
                 scene: &mut self.scene,
+                ui: &mut self.ui,
                 camera: &mut self.camera,
             };
             self.game.update(&mut ctx);
@@ -336,13 +350,6 @@ impl<G: Game> EngineApp<G> {
         }
 
         let sprites = self.scene.take_sorted();
-        let mut used_textures = std::collections::HashSet::new();
-        for sprite in &sprites {
-            used_textures.insert(sprite.texture);
-        }
-
-        let aspect = self.renderer.as_ref().map(|r| r.aspect()).unwrap_or(1.0);
-        let view_proj = self.camera.view_proj(aspect);
 
         let (Some(renderer), Some(gfx), Some(window)) = (
             self.renderer.as_mut(),
@@ -351,10 +358,38 @@ impl<G: Game> EngineApp<G> {
         ) else {
             return;
         };
+
+        let white = gfx.white_texture();
+        self.ui.layout(fb_size, white, |id| gfx.texture_size(id));
+        let ui_sprites = self.ui.take_sprites();
+
+        let mut used_textures = std::collections::HashSet::new();
+        for sprite in &sprites {
+            used_textures.insert(sprite.texture);
+        }
+        for sprite in &ui_sprites {
+            used_textures.insert(sprite.texture);
+        }
+        used_textures.insert(white);
+
+        let aspect = renderer.aspect();
+        let view_proj = self.camera.view_proj(aspect);
+        let ui_camera = Camera {
+            eye: Vec3::new(0.0, 0.0, 10.0),
+            target: Vec3::ZERO,
+            up: Vec3::Y,
+            projection: Projection::Orthographic {
+                height: fb_size[1].max(1.0),
+                near: 0.1,
+                far: 100.0,
+            },
+        };
+        let ui_view_proj = ui_camera.view_proj(fb_size[0].max(1.0) / fb_size[1].max(1.0));
+
         gfx.ensure_resident(&used_textures);
 
         let mut surface_lost = false;
-        match renderer.render(view_proj, &sprites, gfx) {
+        match renderer.render(view_proj, &sprites, ui_view_proj, &ui_sprites, gfx) {
             Ok(()) => {}
             Err(FrameError::Reconfigure) => {
                 let size = window.inner_size();
@@ -462,9 +497,11 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                let pressed =
-                    state == ElementState::Pressed && matches!(button, MouseButton::Left);
-                self.maybe_open_audio(pressed);
+                if matches!(button, MouseButton::Left) {
+                    let pressed = state == ElementState::Pressed;
+                    self.input.pointer_event(pressed);
+                    self.maybe_open_audio(pressed);
+                }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input

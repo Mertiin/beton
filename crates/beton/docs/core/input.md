@@ -64,11 +64,18 @@ The same snapshot tracks the pointer. Positions are **physical framebuffer pixel
 
 Turn pixels into world XY with `ctx.camera.screen_to_world(ctx.input.cursor_px(), ctx.fb_size[0], ctx.fb_size[1])` (orthographic cameras). See [camera.md](camera.md).
 
-Mouse **buttons** are not stored here. A left press is only used by `app` to open audio on the web.
+## Left pointer button
+
+| API | Meaning |
+|-----|---------|
+| `pointer_down()` | Left mouse button currently held |
+| `pointer_pressed()` | Left button went down **this frame** |
+
+Same edge rules as keys: OS repeats do not spam `pointer_pressed`. Cleared in `begin_frame` after the frame. Used by [ui.md](ui.md) for clicks; a left press still unlocks audio on the web.
 
 ## What this module does not handle
 
-- Mouse / touch buttons, or touch points
+- Right / middle mouse buttons, or touch points
 - Gamepad
 - Text input (for typing your name) — that needs characters, not key codes
 - Key binding remapping UI
@@ -111,4 +118,6 @@ if ctx.input.down(Key::ShiftLeft) && ctx.input.pressed(Key::KeyR) {
 ## Related docs
 
 - [app.md](app.md) — when events are applied vs when `begin_frame` runs
-- [camera.md](camera.md) — `screen_to_world`  
+- [camera.md](camera.md) — `screen_to_world`
+- [ui.md](ui.md) — screen UI hit-testing from the pointer
+

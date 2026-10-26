@@ -12,3 +12,4 @@ pub mod object;
 pub(crate) mod platform;
 pub mod render;
 pub mod scene;
+pub mod ui;

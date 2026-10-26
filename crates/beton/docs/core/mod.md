@@ -32,8 +32,9 @@ The other modules are `pub` so `lib.rs` can `pub use` their types. A game still 
 | `app` | `app/mod.rs` | [app.md](app.md) | Window, clock, `Game` / `run` |
 | `object` | `object/` | [object/mod.md](object/mod.md) | Retained objects, parents, components |
 | `scene` | `scene/mod.rs` | [scene.md](scene.md) | One-frame sprites and text |
+| `ui` | `ui/mod.rs` | [ui.md](ui.md) | Screen-fixed layout UI |
 | `camera` | `camera/mod.rs` | [camera.md](camera.md) | View and projection |
-| `input` | `input/mod.rs` | [input.md](input.md) | Keys and cursor |
+| `input` | `input/mod.rs` | [input.md](input.md) | Keys, cursor, pointer |
 | `net` | `net/mod.rs` | [net.md](net.md) | Host / client message channel |
 | `anim` | `anim/mod.rs` | [anim.md](anim.md) | Sheets and clips |
 | `audio` | `audio/mod.rs` | [audio.md](audio.md) | Clips and voices |

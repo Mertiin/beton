@@ -14,11 +14,16 @@ pub struct Input {
     cursor_px: [f32; 2],
     /// True when the cursor is over the window.
     cursor_inside: bool,
+    /// Left mouse button currently held.
+    pointer_down: bool,
+    /// Left mouse button went down this frame.
+    pointer_pressed: bool,
 }
 
 impl Input {
     pub(crate) fn begin_frame(&mut self) {
         self.pressed.clear();
+        self.pointer_pressed = false;
     }
 
     pub(crate) fn key_event(&mut self, key: Key, is_pressed: bool) {
@@ -28,6 +33,17 @@ impl Input {
             }
         } else {
             self.down.remove(&key);
+        }
+    }
+
+    pub(crate) fn pointer_event(&mut self, is_pressed: bool) {
+        if is_pressed {
+            if !self.pointer_down {
+                self.pointer_pressed = true;
+            }
+            self.pointer_down = true;
+        } else {
+            self.pointer_down = false;
         }
     }
 
@@ -48,6 +64,16 @@ impl Input {
     /// True if the key went down this frame.
     pub fn pressed(&self, key: Key) -> bool {
         self.pressed.contains(&key)
+    }
+
+    /// True while the left mouse button is held.
+    pub fn pointer_down(&self) -> bool {
+        self.pointer_down
+    }
+
+    /// True if the left mouse button went down this frame.
+    pub fn pointer_pressed(&self) -> bool {
+        self.pointer_pressed
     }
 
     /// Cursor in physical framebuffer pixels (origin top-left, Y down).

@@ -1,9 +1,9 @@
 //! Compile-time / CPU-side check that the public API stays constructible without a GPU.
 
 use beton::{
-    integrate_velocities, Animation, Camera, Config, Font, GameObject, Net, NetRole, PeerId,
-    Projection, SoundId, Sprite, SpriteSheet, TextureId, Vec3, Velocity, World, MAX_PAYLOAD,
-    MAX_PEERS,
+    integrate_velocities, Animation, Camera, Config, Display, Font, GameObject, Net, NetRole,
+    PeerId, Projection, Size, SoundId, Sprite, SpriteSheet, Style, TextureId, Ui, UiId, Vec3,
+    Velocity, World, MAX_PAYLOAD, MAX_PEERS,
 };
 
 #[cfg(feature = "physics")]
@@ -43,12 +43,19 @@ fn public_types_construct() {
     let texture = TextureId::from_raw(0);
     let _sound = SoundId::from_raw(0);
     let sprite = Sprite::new(texture, Vec3::ZERO, [1.0, 1.0]);
-    let _font = Font {
-        texture,
-        columns: 10,
-        rows: 1,
-        first_char: '0',
-    };
+    let _font = Font::grid(texture, 10, 1, '0');
+    let mut ui = Ui::default();
+    ui.node(
+        UiId(1),
+        Style {
+            display: Display::Block,
+            width: Size::Px(100.0),
+            height: Size::Px(40.0),
+            ..Style::default()
+        },
+        |_| {},
+    );
+    assert!(!ui.hovered(UiId(1)));
 
     let sheet = SpriteSheet {
         texture,

@@ -142,12 +142,7 @@ impl Game for Gallery {
 
         self.white = Some(ctx.gfx.pin(white).expect("pin white"));
         self.font_tex = Some(ctx.gfx.pin(font_id).expect("pin font"));
-        self.font = Some(Font {
-            texture: font_id,
-            columns: 10,
-            rows: 1,
-            first_char: '0',
-        });
+        self.font = Some(Font::grid(font_id, 10, 1, '0'));
 
         *ctx.camera = Camera {
             eye: Vec3::new(0.0, 0.0, 10.0),

@@ -84,31 +84,30 @@ If one PNG holds three equal frames side by side:
 
 ## `Font` and `Scene::text`
 
-A `Font` is a grid atlas of glyphs:
+A `Font` is either a **fixed grid** atlas or a **baked TrueType** atlas.
 
-| Field | Meaning |
-|-------|---------|
-| `texture` | Atlas image |
-| `columns`, `rows` | Grid shape |
-| `first_char` | Character that lives in cell 0 |
-
-Flappy builds a 10×1 digit strip (`'0'`…`'9'`) in CPU memory and uploads it with `create_texture`. Then:
+### Grid (digits, custom sheets)
 
 ```rust
-scene.text(&font, origin, glyph_size, color, "12");
+let font = Font::grid(texture, 10, 1, '0');
+scene.text(&font, origin, [1.1, 1.4], color, "12");
 ```
 
-For each character:
+`glyph_size` is the cell size. Unknown characters leave a gap but still advance X.
 
-1. `index = ch as u32 - first_char as u32`
-2. Skip if out of range (unknown chars leave a gap but still advance X)
-3. Map index → column/row → UV with padding
-4. Push a sprite centered at the glyph cell
-5. Advance `origin.x` by `glyph_size[0]`
+### TrueType / OpenType (e.g. Roboto)
 
-`origin` is the **left** of the first glyph (baseline-ish center Y). Glyph sprites are centered at `x + glyph_size[0]/2`.
+```rust
+let font = Font::load(ctx.gfx, Path::new("assets/Roboto-Regular.ttf"), 48.0)?;
+// or Font::from_ttf(ctx.gfx, &bytes, 48.0)?;
+scene.text(&font, origin, [0.0, 1.4], color, "START");
+```
 
-Drop shadows are just two `text` calls — dark offset behind, white on top (see Flappy score).
+List the `.ttf` in `Game::assets` (required on the web). `px` is the bake size; `glyph_size[1]` is the draw em height in the same units as `origin`. Printable ASCII (32..=126) is packed into one texture. Pin `font.texture` if you need it resident.
+
+`Font::measure(glyph_size, text)` returns the laid-out `[width, height]` (used by UI layout).
+
+`origin` is the **left** of the first glyph; `origin.y` is the vertical center of the em box. Drop shadows are two `text` calls — dark offset behind, white on top (see Flappy score).
 
 ## Draw order (Z)
 

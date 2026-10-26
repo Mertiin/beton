@@ -5,14 +5,16 @@
 use std::path::Path;
 
 use beton::{
-    run, Animation, Camera, Config, Context, Font, Game, GameObject, GameObjectId, Key, Projection,
-    Rng, Scene, SoundHandle, Sprite, SpriteSheet, TextureHandle, TextureId, Vec3, World,
+    run, Align, Animation, Camera, Config, Context, Direction, Display, Font, Game, GameObject,
+    GameObjectId, Justify, Key, Projection, Rng, Scene, Size, SoundHandle, Sprite, SpriteSheet,
+    Style, TextureHandle, TextureId, UiId, Vec3, World,
 };
 
 const ASSETS: &[&str] = &[
     "assets/bird-sheet.png",
     "assets/pipe.png",
     "assets/bgm.ogg",
+    "assets/Roboto-Regular.ttf",
 ];
 
 const SFX_VOL: f32 = 0.4;
@@ -41,6 +43,16 @@ const BIRD_TILT_DOWN: f32 = -1.15;
 const BIRD_TILT_UP_SPEED: f32 = 12.0;
 const BIRD_TILT_DOWN_SPEED: f32 = 3.5;
 
+const UI_START_PANEL: UiId = UiId(1);
+const UI_START_BTN: UiId = UiId(2);
+const UI_START_LABEL: UiId = UiId(3);
+const UI_OVER_DIMMER: UiId = UiId(4);
+const UI_OVER_PANEL: UiId = UiId(5);
+const UI_OVER_TITLE: UiId = UiId(6);
+const UI_OVER_SCORE: UiId = UiId(7);
+const UI_RESTART_BTN: UiId = UiId(8);
+const UI_RESTART_LABEL: UiId = UiId(9);
+
 /// Digit atlas: 10 cells of 16x20 (each source pixel scaled 4x from 4x5).
 const DIGIT_CELL_W: u32 = 16;
 const DIGIT_CELL_H: u32 = 20;
@@ -59,9 +71,11 @@ struct Flappy {
     /// Pins keep boot textures resident for the whole session.
     white: Option<TextureHandle>,
     font_tex: Option<TextureHandle>,
+    ui_font_tex: Option<TextureHandle>,
     bird_tex: Option<TextureHandle>,
     pipe: Option<TextureHandle>,
     font: Option<Font>,
+    ui_font: Option<Font>,
     bird_anim: Option<Animation>,
     flap_sfx: Option<SoundHandle>,
     score_sfx: Option<SoundHandle>,
@@ -81,9 +95,11 @@ impl Flappy {
             state: State::Ready,
             white: None,
             font_tex: None,
+            ui_font_tex: None,
             bird_tex: None,
             pipe: None,
             font: None,
+            ui_font: None,
             bird_anim: None,
             flap_sfx: None,
             score_sfx: None,
@@ -185,12 +201,12 @@ impl Game for Flappy {
         self.font_tex = Some(ctx.gfx.pin(font_tex).expect("pin font"));
         self.bird_tex = Some(ctx.gfx.pin(bird_tex).expect("pin bird"));
         self.pipe = Some(ctx.gfx.pin(pipe).expect("pin pipe"));
-        self.font = Some(Font {
-            texture: font_tex,
-            columns: 10,
-            rows: 1,
-            first_char: '0',
-        });
+        self.font = Some(Font::grid(font_tex, 10, 1, '0'));
+
+        let ui_font = Font::load(ctx.gfx, Path::new("assets/Roboto-Regular.ttf"), 48.0)
+            .expect("Roboto");
+        self.ui_font_tex = Some(ctx.gfx.pin(ui_font.texture).expect("pin ui font"));
+        self.ui_font = Some(ui_font);
         // Sheet cells: 0=up, 1=mid, 2=down. Clip bounces mid twice for a smooth flap.
         self.bird_anim = Some(Animation::new(
             SpriteSheet {
@@ -253,13 +269,20 @@ impl Game for Flappy {
 
         match self.state {
             State::Ready => {
-                draw_score(ctx.scene, &font, self.score);
-                if ctx.input.pressed(Key::Space) {
+                let start_hot = ctx.ui.hovered(UI_START_BTN);
+                let start_click =
+                    ctx.ui.clicked(UI_START_BTN) || ctx.ui.clicked(UI_START_LABEL);
+                let ui_font = self.ui_font.clone().expect("boot");
+                draw_start_menu(ctx, &ui_font, start_hot);
+                if ctx.input.pressed(Key::Space)
+                    || ctx.input.pointer_pressed()
+                    || start_click
+                {
                     self.start_run(ctx);
                 }
             }
             State::Playing => {
-                if ctx.input.pressed(Key::Space) {
+                if ctx.input.pressed(Key::Space) || ctx.input.pointer_pressed() {
                     self.bird_vy = FLAP;
                     if let Some(sfx) = self.flap_sfx.as_ref() {
                         ctx.audio.play(sfx.id(), SFX_VOL);
@@ -300,8 +323,15 @@ impl Game for Flappy {
                 draw_score(ctx.scene, &font, self.score);
             }
             State::Over => {
-                draw_score(ctx.scene, &font, self.score);
-                if ctx.input.pressed(Key::Space) {
+                let restart_hot = ctx.ui.hovered(UI_RESTART_BTN);
+                let restart_click =
+                    ctx.ui.clicked(UI_RESTART_BTN) || ctx.ui.clicked(UI_RESTART_LABEL);
+                let ui_font = self.ui_font.clone().expect("boot");
+                draw_end_menu(ctx, &ui_font, self.score, restart_hot);
+                if ctx.input.pressed(Key::Space)
+                    || ctx.input.pointer_pressed()
+                    || restart_click
+                {
                     self.reset(ctx.world);
                 }
             }
@@ -481,6 +511,140 @@ fn draw_score(scene: &mut Scene, font: &Font, score: u32) {
         glyph,
         [1.0, 1.0, 1.0, 1.0],
         &text,
+    );
+}
+
+fn draw_start_menu(ctx: &mut Context, font: &Font, start_hot: bool) {
+    let [fb_w, fb_h] = ctx.fb_size;
+    ctx.ui.node(
+        UI_START_PANEL,
+        Style {
+            display: Display::Flex,
+            direction: Direction::Column,
+            width: Size::Px(fb_w),
+            height: Size::Px(fb_h),
+            justify: Justify::Center,
+            align: Align::Center,
+            background: Some([0.05, 0.08, 0.12, 0.35]),
+            ..Style::default()
+        },
+        |ui| {
+            ui.node(
+                UI_START_BTN,
+                Style {
+                    display: Display::Flex,
+                    direction: Direction::Row,
+                    width: Size::Px(200.0),
+                    height: Size::Px(64.0),
+                    justify: Justify::Center,
+                    align: Align::Center,
+                    background: Some(if start_hot {
+                        [0.35, 0.85, 0.45, 1.0]
+                    } else {
+                        [0.2, 0.65, 0.3, 1.0]
+                    }),
+                    ..Style::default()
+                },
+                |ui| {
+                    ui.text(
+                        UI_START_LABEL,
+                        font,
+                        [0.0, 28.0],
+                        Style {
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            ..Style::default()
+                        },
+                        "START",
+                    );
+                },
+            );
+        },
+    );
+}
+
+fn draw_end_menu(ctx: &mut Context, font: &Font, score: u32, restart_hot: bool) {
+    let [fb_w, fb_h] = ctx.fb_size;
+    let score_text = format!("Score  {score}");
+    ctx.ui.node(
+        UI_OVER_DIMMER,
+        Style {
+            display: Display::Flex,
+            direction: Direction::Column,
+            width: Size::Px(fb_w),
+            height: Size::Px(fb_h),
+            justify: Justify::Center,
+            align: Align::Center,
+            background: Some([0.0, 0.0, 0.0, 0.55]),
+            ..Style::default()
+        },
+        |ui| {
+            ui.node(
+                UI_OVER_PANEL,
+                Style {
+                    display: Display::Flex,
+                    direction: Direction::Column,
+                    width: Size::Px(280.0),
+                    height: Size::Px(220.0),
+                    padding: Style::edges(24.0),
+                    gap: 16.0,
+                    justify: Justify::Center,
+                    align: Align::Center,
+                    background: Some([0.14, 0.16, 0.2, 0.95]),
+                    ..Style::default()
+                },
+                |ui| {
+                    ui.text(
+                        UI_OVER_TITLE,
+                        font,
+                        [0.0, 32.0],
+                        Style {
+                            color: [1.0, 0.85, 0.4, 1.0],
+                            ..Style::default()
+                        },
+                        "GAME OVER",
+                    );
+                    ui.text(
+                        UI_OVER_SCORE,
+                        font,
+                        [0.0, 26.0],
+                        Style {
+                            color: [1.0, 1.0, 1.0, 1.0],
+                            ..Style::default()
+                        },
+                        &score_text,
+                    );
+                    ui.node(
+                        UI_RESTART_BTN,
+                        Style {
+                            display: Display::Flex,
+                            direction: Direction::Row,
+                            width: Size::Px(180.0),
+                            height: Size::Px(52.0),
+                            justify: Justify::Center,
+                            align: Align::Center,
+                            background: Some(if restart_hot {
+                                [0.95, 0.55, 0.3, 1.0]
+                            } else {
+                                [0.8, 0.4, 0.2, 1.0]
+                            }),
+                            ..Style::default()
+                        },
+                        |ui| {
+                            ui.text(
+                                UI_RESTART_LABEL,
+                                font,
+                                [0.0, 24.0],
+                                Style {
+                                    color: [1.0, 1.0, 1.0, 1.0],
+                                    ..Style::default()
+                                },
+                                "RETRY",
+                            );
+                        },
+                    );
+                },
+            );
+        },
     );
 }
 
