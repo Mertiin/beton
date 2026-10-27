@@ -24,6 +24,13 @@ cargo run --release -p physics
 cargo run --release -p netplay
 cargo run --release -p tetris
 cargo run --release -p ui
+cargo run --release -p brutal-pixels
+```
+
+Web (from `games/brutal-pixels`):
+
+```bash
+trunk serve --release
 ```
 
 - **flappy** — Start / restart from the on-screen menus (or Space). Space flaps while playing.
@@ -33,6 +40,7 @@ cargo run --release -p ui
 - **netplay** — two-player Pong over WebSocket. Host is left paddle (simulates the ball); first client is right. `H` hosts port 7777, `C` connects. Or `netplay host [PORT]` / `netplay connect HOST:PORT`. W/S or arrows (mouse Y also works). Needs a desktop host (browser can only dial out).
 - **tetris** — classic Tetris (7-bag, hold, ghost). Arrows/WASD move, Up/W/X rotate, Z CCW, Space hard drop, C/Shift hold, R restarts. Board logic is isolated for a later battle-royale mode.
 - **ui** — screen UI demo: HUD with image/count hover, a button opens a dimmed settings panel, Back closes it.
+- **brutal-pixels** — side-view tower auto-battler. Buy modules from the bottom bar onto your tower, FIGHT for auto combat (guns + walking units). HP resets each round; loadout persists. Click a mounted module twice to sell. R restarts after a win or loss.
 
 Escape or the window close button exits.
 
