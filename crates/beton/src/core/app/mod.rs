@@ -70,6 +70,19 @@ pub struct Context<'a> {
     pub ui: &'a mut Ui,
     /// Active camera.
     pub camera: &'a mut Camera,
+    continuous: &'a mut bool,
+}
+
+impl Context<'_> {
+    /// Keep the loop ticking (`true`, default) or sleep until the next OS event (`false`).
+    ///
+    /// A shop can turn this off so the window waits for clicks. A fight turns it
+    /// back on so attack pauses and HP flashes advance. The flag is read after
+    /// [`Game::update`](Game::update), so a click that starts combat begins the
+    /// clock on the way out of that frame.
+    pub fn set_continuous(&mut self, continuous: bool) {
+        *self.continuous = continuous;
+    }
 }
 
 /// Implement this on your game state and pass it to [`run`].
@@ -135,6 +148,7 @@ pub fn run(config: Config, game: impl Game + 'static) -> Result<(), String> {
         start: now,
         last: now,
         next_frame_at: now,
+        continuous: true,
         booted: false,
         gpu_pending: false,
         exit_error: Arc::clone(&exit_error),
@@ -167,9 +181,33 @@ struct EngineApp<G: Game> {
     start: Instant,
     last: Instant,
     next_frame_at: Instant,
+    /// When false, the loop sleeps on `ControlFlow::Wait` until an OS event.
+    continuous: bool,
     booted: bool,
     gpu_pending: bool,
     exit_error: Arc<Mutex<Option<String>>>,
+}
+
+/// How the event loop should sleep between frames.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum WakeKind {
+    /// Sleep until the next OS event (idle shop / menu).
+    Wait,
+    /// Sleep until the next FPS deadline.
+    WaitUntil,
+    /// Poll as fast as the OS allows (uncapped continuous).
+    Poll,
+}
+
+/// Choose the control-flow style from the continuous flag and FPS cap.
+fn wake_kind(continuous: bool, has_frame_period: bool) -> WakeKind {
+    if !continuous {
+        WakeKind::Wait
+    } else if has_frame_period {
+        WakeKind::WaitUntil
+    } else {
+        WakeKind::Poll
+    }
 }
 
 impl<G: Game> EngineApp<G> {
@@ -188,11 +226,24 @@ impl<G: Game> EngineApp<G> {
             .map(|fps| Duration::from_secs_f64(1.0 / f64::from(fps)))
     }
 
-    /// Sleep until the next frame is due, or poll when uncapped.
+    /// Sleep until the next frame is due, poll when uncapped, or wait on OS events when idle.
     fn schedule_wake(&self, event_loop: &ActiveEventLoop) {
-        match self.frame_period() {
-            Some(_) => event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_at)),
-            None => event_loop.set_control_flow(ControlFlow::Poll),
+        match wake_kind(self.continuous, self.frame_period().is_some()) {
+            WakeKind::Wait => event_loop.set_control_flow(ControlFlow::Wait),
+            WakeKind::WaitUntil => {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_frame_at))
+            }
+            WakeKind::Poll => event_loop.set_control_flow(ControlFlow::Poll),
+        }
+    }
+
+    /// While idle, one OS input should paint the next hover / click frame.
+    fn request_redraw_if_idle(&self) {
+        if self.continuous {
+            return;
+        }
+        if let Some(window) = &self.window {
+            window.request_redraw();
         }
     }
 
@@ -263,6 +314,7 @@ impl<G: Game> EngineApp<G> {
             scene: &mut self.scene,
             ui: &mut self.ui,
             camera: &mut self.camera,
+            continuous: &mut self.continuous,
         };
         self.game.boot(&mut ctx);
         self.net.end_frame();
@@ -319,6 +371,7 @@ impl<G: Game> EngineApp<G> {
                 scene: &mut self.scene,
                 ui: &mut self.ui,
                 camera: &mut self.camera,
+                continuous: &mut self.continuous,
             };
             self.game.update(&mut ctx);
         }
@@ -495,12 +548,14 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
                 if let PhysicalKey::Code(code) = event.physical_key {
                     self.input.key_event(code, pressed);
                 }
+                self.request_redraw_if_idle();
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if matches!(button, MouseButton::Left) {
                     let pressed = state == ElementState::Pressed;
                     self.input.pointer_event(pressed);
                     self.maybe_open_audio(pressed);
+                    self.request_redraw_if_idle();
                 }
             }
             WindowEvent::Touch(touch) => {
@@ -517,10 +572,12 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
                     }
                     TouchPhase::Moved => {}
                 }
+                self.request_redraw_if_idle();
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.input
                     .cursor_moved(position.x as f32, position.y as f32);
+                self.request_redraw_if_idle();
             }
             WindowEvent::CursorLeft { .. } => {
                 self.input.cursor_left();
@@ -552,6 +609,11 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
             return;
         };
 
+        if !self.continuous {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        }
+
         if let Some(_period) = self.frame_period() {
             let now = Instant::now();
             if now < self.next_frame_at {
@@ -562,5 +624,26 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
 
         window.request_redraw();
         self.schedule_wake(event_loop);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{wake_kind, WakeKind};
+
+    #[test]
+    fn idle_selects_wait() {
+        assert_eq!(wake_kind(false, true), WakeKind::Wait);
+        assert_eq!(wake_kind(false, false), WakeKind::Wait);
+    }
+
+    #[test]
+    fn continuous_with_period_selects_wait_until() {
+        assert_eq!(wake_kind(true, true), WakeKind::WaitUntil);
+    }
+
+    #[test]
+    fn continuous_without_cap_selects_poll() {
+        assert_eq!(wake_kind(true, false), WakeKind::Poll);
     }
 }

@@ -76,7 +76,7 @@ trunk build --release
 
 Artifacts land in `target/twenty48-web/` or `games/flappy/dist/`.
 
-Pushes to `main` publish flappy, 2048, physics, netplay, and tetris to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay on Pages is a client only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
+Pushes to `main` publish flappy, 2048, physics, netplay, tetris, and brutal-pixels to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay on Pages is a client only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
 
 Click the canvas so it has keyboard focus. Escape does not quit on the web (it would leave a dead page). On flappy, click first so audio can start (browser gesture rule), then Space flaps. File assets listed in `Game::assets` are fetched over HTTP (Trunk copies `games/flappy/assets/` into the dist).
 

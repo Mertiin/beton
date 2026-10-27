@@ -69,6 +69,7 @@ A bundle of borrows valid for one `boot` / `update` call:
 | `world` | `&mut World` | Retained entities. |
 | `scene` | `&mut Scene` | Cleared every frame *before* `update`. Push anything that is not on a `GameObject`. |
 | `camera` | `&mut Camera` | Change whenever you want (usually once in `boot`). |
+| `set_continuous` | method | `true` (default) keeps the FPS timer; `false` sleeps until the next OS event |
 
 `Context` is not `Send` across threads and does not outlive the frame. Do not store references from it in your game struct — store **ids** and **TextureIds** instead.
 
@@ -98,7 +99,7 @@ This order is intentional. Knowing it prevents “why did my collision see last 
 12. **`renderer.render(...)`** — upload + draw + present (see [render/mod.md](render/mod.md)).
 13. **`gfx.reap`** — after present, advance the unused timer and drop GPU textures past the 2 second grace. In-flight draws already sampled them.
 14. **`input.begin_frame()`** — clear the “pressed this frame” set so edges do not stick.
-15. **Schedule next wake** — if `max_fps` is set, `next_frame_at = now + 1/fps`.
+15. **Schedule next wake** — if continuous and `max_fps` is set, `next_frame_at = now + 1/fps`. If idle (`set_continuous(false)`), sleep on `Wait` until an OS event.
 
 ### Motion belongs to the game
 
@@ -116,9 +117,9 @@ Speeds can live on your `Game` struct, or on the built-in [`Velocity`](object/ve
 
 So you cannot accidentally “leak” last frame’s score glyphs or backdrop. Everything immediate must be re-issued. World sprites are re-copied automatically after `update`.
 
-## Frame pacing (`max_fps`)
+## Frame pacing (`max_fps` and `set_continuous`)
 
-Two different limiters exist:
+Two different limiters exist while the loop is continuous (the default):
 
 | Limiter | Where | Effect |
 |---------|-------|--------|
@@ -130,6 +131,12 @@ With `max_fps: Some(60)` the loop **does not busy-spin**. When the previous fram
 With `max_fps: None` it uses `ControlFlow::Poll` and requests a redraw whenever the loop is about to wait — maximum responsiveness, more CPU wakeups. GPU work is still usually vsync-limited.
 
 After a slow frame, the next deadline is `Instant::now() + period` (not “catch up from a backlog”), so the engine does **not** try to burn multiple updates back-to-back to repay debt. That keeps gameplay from “fast-forwarding” after a hitch; `dt` already absorbed the hitch (up to 0.1 s).
+
+### Idle mode (`set_continuous(false)`)
+
+A shop or menu can call `ctx.set_continuous(false)`. The event loop then uses `ControlFlow::Wait` and **does not** request a redraw on every wake. Pointer, touch, and keyboard events request one redraw so hover and clicks still paint. Resize / scale changes and surface retry / reconfigure still request a redraw as before.
+
+Call `ctx.set_continuous(true)` when combat or another animation needs the timer again. The flag is read after `update`, so a click that starts a fight begins the clock on the way out of that frame. Existing games leave the default alone and keep today's pacing.
 
 ## Window / OS events worth knowing
 
@@ -143,7 +150,7 @@ After a slow frame, the next deadline is `Instant::now() + period` (not “catch
 | `CursorMoved` / `CursorLeft` | Update `Input` cursor position and inside flag |
 | `Resized` / `ScaleFactorChanged` | Resize swapchain + depth buffer, request redraw |
 | `CloseRequested` | Exit |
-| `about_to_wait` | If FPS-capped and early, sleep; else request redraw |
+| `about_to_wait` | Continuous: if FPS-capped and early, sleep; else request redraw. Idle: `Wait`, no redraw |
 
 On some platforms the window is only really ready in `resumed`. That is why `boot` is not called from `run` immediately — there is no GPU yet.
 
