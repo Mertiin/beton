@@ -39,9 +39,9 @@
         <li><a href="netplay/">netplay</a> — Pong client. C asks for <code>ip:port</code> (H cannot host in the browser).</li>
         <li><a href="tetris/">tetris</a> — arrows / WASD, Space hard drop, C hold, R restart.</li>
         <li><a href="brutal-pixels/">brutal-pixels</a> — tower auto-battler. Buy modules, FIGHT, sell by double-click.</li>
-        <li><a href="worms/">worms</a> — hotseat Worms-style dig. Online needs a desktop host (JOIN only in the browser).</li>
+        <li><a href="worms/">worms</a> — hotseat or online via <code>worms.itknegaren.com</code> (Browse / Host online).</li>
       </ul>
-      <p class="note">Click the canvas so the page has keyboard focus. Escape does not quit in the browser. Netplay and worms on Pages (https) can only use <code>ws://127.0.0.1</code> or <code>wss://…</code> — plain <code>ws://</code> to a public IP is blocked by the browser.</p>
+      <p class="note">Click the canvas so the page has keyboard focus. Escape does not quit in the browser. Worms online uses <code>https://worms.itknegaren.com</code> for the lobby and <code>wss://</code> signaling (UDP media still hits the public host ports).</p>
     </main>
   </body>
 </html>

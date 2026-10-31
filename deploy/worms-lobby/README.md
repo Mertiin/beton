@@ -21,9 +21,12 @@ Worms lobby should be the same: **Coolify builds the image from git** — not a 
 6. Environment:
 
 ```text
-PUBLIC_WS_BASE=ws://37.27.220.29
+PUBLIC_WS_BASE=wss://worms.itknegaren.com/r
 BETON_PUBLIC_IP=37.27.220.29
 ```
+
+HTTPS clients (GitHub Pages) join via Traefik → lobby `/r/{port}` WebSocket proxy → dedicated room.
+UDP `7800–7899` must still be published for WebRTC media.
 
 7. Deploy. Coolify builds `deploy/worms-lobby/Dockerfile` and routes HTTPS like Hotpot.
 

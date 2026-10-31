@@ -33,6 +33,11 @@ struct Shared {
     dg: Option<RtcDataChannel>,
     rel_open: bool,
     dg_open: bool,
+    /// Host trickle candidates arrive before `setRemoteDescription` finishes.
+    remote_ready: bool,
+    pending_candidates: Vec<String>,
+    /// `a=mid:` from the remote offer — Chrome rejects a mismatched `sdpMid`.
+    sdp_mid: Option<String>,
 }
 
 /// Closures that must outlive the peer connection / channels.
@@ -77,6 +82,9 @@ impl NetDriver {
             dg: None,
             rel_open: false,
             dg_open: false,
+            remote_ready: false,
+            pending_candidates: Vec::new(),
+            sdp_mid: None,
         }));
         let bags = Rc::new(RefCell::new(ClosureBag {
             channel_open: Vec::new(),
@@ -173,6 +181,7 @@ impl NetDriver {
 
         let msg_pc = pc.clone();
         let msg_socket = socket.clone();
+        let msg_shared = Rc::clone(&shared);
         let on_message = Closure::wrap(Box::new(move |ev: MessageEvent| {
             let data = ev.data();
             let bytes = if let Ok(buf) = data.dyn_into::<js_sys::ArrayBuffer>() {
@@ -188,14 +197,33 @@ impl NetDriver {
                     let Ok(sdp) = std::str::from_utf8(payload) else {
                         return;
                     };
+                    let mid = extract_sdp_mid(sdp);
+                    if let Ok(mut guard) = msg_shared.try_borrow_mut() {
+                        guard.sdp_mid = mid;
+                        guard.remote_ready = false;
+                    }
                     let desc = RtcSessionDescriptionInit::new(RtcSdpType::Offer);
                     desc.set_sdp(sdp);
                     let set_remote = msg_pc.set_remote_description(&desc);
                     let pc2 = msg_pc.clone();
                     let sock2 = msg_socket.clone();
+                    let shared2 = Rc::clone(&msg_shared);
                     wasm_bindgen_futures::spawn_local(async move {
                         if wasm_bindgen_futures::JsFuture::from(set_remote).await.is_err() {
                             return;
+                        }
+                        let pending = if let Ok(mut guard) = shared2.try_borrow_mut() {
+                            guard.remote_ready = true;
+                            std::mem::take(&mut guard.pending_candidates)
+                        } else {
+                            Vec::new()
+                        };
+                        let mid = shared2
+                            .try_borrow()
+                            .ok()
+                            .and_then(|g| g.sdp_mid.clone());
+                        for cand in pending {
+                            add_remote_candidate(&pc2, &cand, mid.as_deref()).await;
                         }
                         let answer_promise = pc2.create_answer();
                         let Ok(answer_js) =
@@ -203,11 +231,11 @@ impl NetDriver {
                         else {
                             return;
                         };
-                        let Ok(answer) = answer_js.dyn_into::<web_sys::RtcSessionDescription>()
-                        else {
+                        // Chrome resolves createAnswer to a plain SDP dict, not
+                        // RTCSessionDescription — dyn_into would silently abort.
+                        let Some(sdp) = sdp_from_description_js(&answer_js) else {
                             return;
                         };
-                        let sdp = answer.sdp();
                         let local = RtcSessionDescriptionInit::new(RtcSdpType::Answer);
                         local.set_sdp(&sdp);
                         let set_local = pc2.set_local_description(&local);
@@ -220,9 +248,25 @@ impl NetDriver {
                     let Ok(cand_str) = std::str::from_utf8(payload) else {
                         return;
                     };
-                    let init = RtcIceCandidateInit::new(cand_str);
-                    init.set_sdp_mid(Some("0"));
-                    let _ = msg_pc.add_ice_candidate_with_opt_rtc_ice_candidate_init(Some(&init));
+                    let cand = normalize_candidate(cand_str);
+                    if cand.is_empty() {
+                        return;
+                    }
+                    let (ready, mid) = match msg_shared.try_borrow_mut() {
+                        Ok(mut guard) if !guard.remote_ready => {
+                            guard.pending_candidates.push(cand);
+                            return;
+                        }
+                        Ok(guard) => (guard.remote_ready, guard.sdp_mid.clone()),
+                        Err(_) => return,
+                    };
+                    if !ready {
+                        return;
+                    }
+                    let pc2 = msg_pc.clone();
+                    wasm_bindgen_futures::spawn_local(async move {
+                        add_remote_candidate(&pc2, &cand, mid.as_deref()).await;
+                    });
                 }
                 _ => {}
             }
@@ -361,6 +405,46 @@ impl NetDriver {
             bag.channel_msg.clear();
         }
     }
+}
+
+fn sdp_from_description_js(value: &JsValue) -> Option<String> {
+    if let Ok(desc) = value.clone().dyn_into::<web_sys::RtcSessionDescription>() {
+        let sdp = desc.sdp();
+        if !sdp.is_empty() {
+            return Some(sdp);
+        }
+    }
+    let sdp = js_sys::Reflect::get(value, &JsValue::from_str("sdp")).ok()?;
+    let sdp = sdp.as_string()?;
+    (!sdp.is_empty()).then_some(sdp)
+}
+
+fn extract_sdp_mid(sdp: &str) -> Option<String> {
+    sdp.lines().find_map(|line| {
+        let line = line.trim();
+        line.strip_prefix("a=mid:")
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+    })
+}
+
+fn normalize_candidate(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches("a=")
+        .trim()
+        .to_string()
+}
+
+async fn add_remote_candidate(pc: &RtcPeerConnection, cand: &str, mid: Option<&str>) {
+    let init = RtcIceCandidateInit::new(cand);
+    if let Some(mid) = mid {
+        init.set_sdp_mid(Some(mid));
+    } else {
+        // Fallback when the offer has no mid — first media line.
+        init.set_sdp_m_line_index(Some(0));
+    }
+    let promise = pc.add_ice_candidate_with_opt_rtc_ice_candidate_init(Some(&init));
+    let _ = wasm_bindgen_futures::JsFuture::from(promise).await;
 }
 
 fn encode_signal(tag: u8, payload: &[u8]) -> Vec<u8> {

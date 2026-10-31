@@ -30,7 +30,7 @@ ENV DEDICATED_BIN=/app/bin/worms-dedicated \
     PORT_MIN=7800 \
     PORT_MAX=7899 \
     LOBBY_PUBLIC_HTTP=http://127.0.0.1:8080 \
-    PUBLIC_WS_BASE=ws://37.27.220.29 \
+    PUBLIC_WS_BASE=wss://worms.itknegaren.com/r \
     BETON_PUBLIC_IP=37.27.220.29
 
 # Coolify sets PORT; map it onto the lobby bind address.

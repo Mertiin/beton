@@ -1,7 +1,7 @@
 # Coolify → New Resource → Docker Compose → this file (repo root).
 # Domain: worms.itknegaren.com (Coolify attaches Traefik/Caddy labels).
 # Env to set in Coolify:
-#   PUBLIC_WS_BASE=ws://37.27.220.29
+#   PUBLIC_WS_BASE=wss://worms.itknegaren.com/r
 #   BETON_PUBLIC_IP=37.27.220.29
 services:
   worms-lobby:
@@ -17,7 +17,7 @@ services:
     environment:
       PORT: "8080"
       LOBBY_PUBLIC_HTTP: "http://127.0.0.1:8080"
-      PUBLIC_WS_BASE: "${PUBLIC_WS_BASE:-ws://37.27.220.29}"
+      PUBLIC_WS_BASE: "${PUBLIC_WS_BASE:-wss://worms.itknegaren.com/r}"
       BETON_PUBLIC_IP: "${BETON_PUBLIC_IP:-37.27.220.29}"
       DEDICATED_BIN: "/app/bin/worms-dedicated"
       ASSETS_DIR: "/app/assets"

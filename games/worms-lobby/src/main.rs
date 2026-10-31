@@ -3,9 +3,13 @@
 //! Env:
 //! - `LOBBY_BIND` (default `0.0.0.0:8080`)
 //! - `PUBLIC_WS_BASE` (default `ws://127.0.0.1`) — join URLs use `{base}:{port}`
+//!   or path form `{base}/{port}` when base ends with `/r` (e.g. `wss://host/r`)
 //! - `DEDICATED_BIN` (default `worms-dedicated`)
 //! - `PORT_MIN` / `PORT_MAX` (default 7800–7899)
 //! - `ASSETS_DIR` optional path passed to dedicated
+//!
+//! HTTPS clients (GitHub Pages) need `PUBLIC_WS_BASE=wss://worms.itknegaren.com/r`.
+//! Traefik terminates TLS on 443; this process proxies `/r/{port}` → `ws://127.0.0.1:{port}`.
 
 use std::collections::HashMap;
 use std::env;
@@ -15,13 +19,17 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use axum::extract::ws::{Message as AxumMessage, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
+use tokio_tungstenite::tungstenite::Message as TungsteniteMessage;
 use tower_http::cors::CorsLayer;
 use uuid::Uuid;
 
@@ -127,6 +135,7 @@ async fn main() {
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/rooms/{id}", get(get_room))
         .route("/api/rooms/{id}/heartbeat", post(heartbeat))
+        .route("/r/{port}", get(room_ws))
         .layer(CorsLayer::permissive())
         .with_state(app);
 
@@ -137,11 +146,71 @@ async fn main() {
 }
 
 fn join_url(base: &str, port: u16) -> String {
-    // PUBLIC_WS_BASE is either `ws://host` / `wss://host` or already includes a path prefix.
-    if base.contains("/r/") {
-        format!("{base}{port}")
+    // PUBLIC_WS_BASE is either `ws://host` / `wss://host` or path prefix ending in `/r`.
+    let base = base.trim_end_matches('/');
+    if base.ends_with("/r") {
+        format!("{base}/{port}")
     } else {
         format!("{base}:{port}")
+    }
+}
+
+async fn room_ws(
+    State(app): State<App>,
+    Path(port): Path<u16>,
+    ws: WebSocketUpgrade,
+) -> Result<impl IntoResponse, StatusCode> {
+    {
+        let inner = app.inner.lock().await;
+        if port < inner.port_min || port > inner.port_max {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        if !inner.rooms.values().any(|r| r.port == port) {
+            return Err(StatusCode::NOT_FOUND);
+        }
+    }
+    Ok(ws.on_upgrade(move |socket| proxy_room_ws(socket, port)))
+}
+
+async fn proxy_room_ws(client: WebSocket, port: u16) {
+    let url = format!("ws://127.0.0.1:{port}");
+    let Ok((server, _)) = tokio_tungstenite::connect_async(&url).await else {
+        return;
+    };
+    let (mut client_tx, mut client_rx) = client.split();
+    let (mut server_tx, mut server_rx) = server.split();
+
+    let client_to_server = async {
+        while let Some(Ok(msg)) = client_rx.next().await {
+            let mapped = match msg {
+                AxumMessage::Binary(b) => TungsteniteMessage::Binary(b),
+                AxumMessage::Text(t) => TungsteniteMessage::Text(t.to_string().into()),
+                AxumMessage::Ping(p) => TungsteniteMessage::Ping(p),
+                AxumMessage::Pong(p) => TungsteniteMessage::Pong(p),
+                AxumMessage::Close(_) => break,
+            };
+            if server_tx.send(mapped).await.is_err() {
+                break;
+            }
+        }
+    };
+    let server_to_client = async {
+        while let Some(Ok(msg)) = server_rx.next().await {
+            let mapped = match msg {
+                TungsteniteMessage::Binary(b) => AxumMessage::Binary(b),
+                TungsteniteMessage::Text(t) => AxumMessage::Text(t.to_string().into()),
+                TungsteniteMessage::Ping(p) => AxumMessage::Ping(p),
+                TungsteniteMessage::Pong(p) => AxumMessage::Pong(p),
+                TungsteniteMessage::Close(_) | TungsteniteMessage::Frame(_) => break,
+            };
+            if client_tx.send(mapped).await.is_err() {
+                break;
+            }
+        }
+    };
+    tokio::select! {
+        _ = client_to_server => {}
+        _ = server_to_client => {}
     }
 }
 
@@ -309,6 +378,10 @@ mod tests {
     fn join_url_path_prefix() {
         assert_eq!(
             join_url("wss://worms.example.com/r/", 7801),
+            "wss://worms.example.com/r/7801"
+        );
+        assert_eq!(
+            join_url("wss://worms.example.com/r", 7801),
             "wss://worms.example.com/r/7801"
         );
     }
