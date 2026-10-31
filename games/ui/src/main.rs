@@ -1,35 +1,26 @@
-//! Screen UI sample: HUD with hover/click, plus an overlay menu.
+//! Screen UI sample: Yoga playground-style phone frame with hover/click.
 
-use beton::{
-    run, Align, Config, Context, Direction, Display, Fit, Font, Game, Justify, Size, Style,
-    TextureHandle, UiId,
-};
+use beton::{run, style, Config, Context, Fit, Font, Game, TextureHandle, UiId};
 
-const HUD: UiId = UiId(1);
+const BODY: UiId = UiId(1);
 const ICON: UiId = UiId(2);
 const COUNT: UiId = UiId(3);
-const OPEN: UiId = UiId(4);
-const DIMMER: UiId = UiId(5);
-const SETTINGS: UiId = UiId(6);
-const BACK: UiId = UiId(7);
+const TAB0: UiId = UiId(4);
+const TAB1: UiId = UiId(5);
+const TAB2: UiId = UiId(6);
+const TAB3: UiId = UiId(7);
 
 const DIGIT_CELL_W: u32 = 16;
 const DIGIT_CELL_H: u32 = 20;
 const DIGIT_ATLAS_W: u32 = DIGIT_CELL_W * 10;
 const DIGIT_ATLAS_H: u32 = DIGIT_CELL_H;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Screen {
-    Play,
-    Settings,
-}
-
 struct UiDemo {
     font: Option<Font>,
     font_tex: Option<TextureHandle>,
     icon: Option<TextureHandle>,
     count: u32,
-    screen: Screen,
+    tab: u32,
 }
 
 impl UiDemo {
@@ -39,7 +30,7 @@ impl UiDemo {
             font_tex: None,
             icon: None,
             count: 0,
-            screen: Screen::Play,
+            tab: 0,
         }
     }
 }
@@ -80,135 +71,132 @@ impl Game for UiDemo {
     }
 
     fn update(&mut self, ctx: &mut Context) {
-        if ctx.ui.clicked(OPEN) {
-            self.screen = Screen::Settings;
-        }
-        if ctx.ui.clicked(BACK) {
-            self.screen = Screen::Play;
-        }
-        if ctx.ui.clicked(COUNT) || ctx.ui.clicked(ICON) {
+        if ctx.ui.clicked(COUNT) || ctx.ui.clicked(ICON) || ctx.ui.clicked(BODY) {
             self.count = self.count.wrapping_add(1) % 100;
+        }
+        for (i, id) in [TAB0, TAB1, TAB2, TAB3].into_iter().enumerate() {
+            if ctx.ui.clicked(id) {
+                self.tab = i as u32;
+            }
         }
 
         let font = self.font.as_ref().expect("boot");
         let icon = self.icon.as_ref().expect("boot").id();
-        let open_hot = ctx.ui.hovered(OPEN);
-        let count_hot = ctx.ui.hovered(COUNT) || ctx.ui.hovered(ICON);
-        let back_hot = ctx.ui.hovered(BACK);
-
+        let count_hot = ctx.ui.hovered(COUNT) || ctx.ui.hovered(ICON) || ctx.ui.hovered(BODY);
         let count_str = format!("{:02}", self.count);
 
-        ctx.ui.node(
-            HUD,
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(ctx.fb_size[0]),
-                height: Size::Px(72.0),
-                padding: Style::edges(12.0),
-                gap: 16.0,
-                align: Align::Center,
-                justify: Justify::Start,
-                background: Some([0.12, 0.14, 0.18, 0.92]),
-                ..Style::default()
-            },
-            |ui| {
-                ui.image(
-                    ICON,
-                    icon,
-                    Style {
-                        width: Size::Px(48.0),
-                        height: Size::Px(48.0),
-                        fit: Fit::Fill,
-                        color: if count_hot {
-                            [1.0, 1.0, 0.7, 1.0]
-                        } else {
-                            [1.0, 1.0, 1.0, 1.0]
-                        },
-                        ..Style::default()
-                    },
-                );
-                ui.text(
-                    COUNT,
-                    font,
-                    [24.0, 30.0],
-                    Style {
-                        color: if count_hot {
-                            [1.0, 1.0, 0.7, 1.0]
-                        } else {
-                            [1.0, 1.0, 1.0, 1.0]
-                        },
-                        ..Style::default()
-                    },
-                    &count_str,
-                );
-                ui.node(
-                    OPEN,
-                    Style {
-                        width: Size::Px(140.0),
-                        height: Size::Px(40.0),
-                        margin: [0.0, 0.0, 0.0, 24.0],
-                        background: Some(if open_hot {
-                            [0.35, 0.55, 0.95, 1.0]
-                        } else {
-                            [0.22, 0.38, 0.72, 1.0]
-                        }),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
-            },
-        );
+        let tab_color = |i: u32, hot: bool| -> [f32; 4] {
+            if self.tab == i {
+                [0.35, 0.55, 0.95, 1.0]
+            } else if hot {
+                [0.45, 0.5, 0.6, 1.0]
+            } else {
+                [0.28, 0.32, 0.4, 1.0]
+            }
+        };
 
-        if self.screen == Screen::Settings {
-            // Pull back over the HUD so the dimmer covers the whole window.
-            ctx.ui.node(
-                DIMMER,
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Column,
-                    width: Size::Px(ctx.fb_size[0]),
-                    height: Size::Px(ctx.fb_size[1]),
-                    margin: [-72.0, 0.0, 0.0, 0.0],
-                    justify: Justify::Center,
-                    align: Align::Center,
-                    background: Some([0.0, 0.0, 0.0, 0.55]),
-                    ..Style::default()
-                },
-                |ui| {
+        ctx.ui.node(
+            UiId(0),
+            style!(
+                width: 250 pt,
+                height: 475 pt,
+                padding: 10 pt,
+                background: Some([0.1, 0.11, 0.14, 1.0]),
+            ),
+            |ui| {
+                ui.node(UiId(0), style!(flex: 1, row_gap: 10 pt), |ui| {
                     ui.node(
-                        SETTINGS,
-                        Style {
-                            display: Display::Flex,
-                            direction: Direction::Column,
-                            width: Size::Px(280.0),
-                            height: Size::Px(160.0),
-                            padding: Style::edges(20.0),
-                            justify: Justify::Center,
-                            align: Align::Center,
+                        UiId(0),
+                        style!(
+                            height: 60 pt,
+                            flex_direction: row,
+                            align_items: center,
+                            padding_inline: 8 pt,
+                            gap: 12 pt,
                             background: Some([0.16, 0.18, 0.24, 1.0]),
-                            ..Style::default()
-                        },
+                        ),
                         |ui| {
-                            ui.node(
-                                BACK,
-                                Style {
-                                    width: Size::Px(120.0),
-                                    height: Size::Px(44.0),
-                                    background: Some(if back_hot {
-                                        [0.9, 0.45, 0.35, 1.0]
+                            ui.image(
+                                ICON,
+                                icon,
+                                style!(
+                                    width: 40 pt,
+                                    height: 40 pt,
+                                    fit: Fit::Fill,
+                                    color: if count_hot {
+                                        [1.0, 1.0, 0.7, 1.0]
                                     } else {
-                                        [0.7, 0.3, 0.25, 1.0]
-                                    }),
-                                    ..Style::default()
-                                },
-                                |_| {},
+                                        [1.0, 1.0, 1.0, 1.0]
+                                    },
+                                ),
+                            );
+                            ui.text(
+                                COUNT,
+                                font,
+                                [20.0, 26.0],
+                                style!(
+                                    color: if count_hot {
+                                        [1.0, 1.0, 0.7, 1.0]
+                                    } else {
+                                        [1.0, 1.0, 1.0, 1.0]
+                                    },
+                                ),
+                                &count_str,
                             );
                         },
                     );
-                },
-            );
-        }
+                    ui.node(
+                        BODY,
+                        style!(
+                            flex: 1,
+                            margin_inline: 10 pt,
+                            background: Some(if count_hot {
+                                [0.22, 0.38, 0.55, 1.0]
+                            } else {
+                                [0.18, 0.28, 0.4, 1.0]
+                            }),
+                        ),
+                        |_| {},
+                    );
+                    ui.node(
+                        UiId(0),
+                        style!(
+                            flex: 2,
+                            margin_inline: 10 pt,
+                            background: Some([0.2, 0.22, 0.28, 1.0]),
+                        ),
+                        |_| {},
+                    );
+                    ui.node(
+                        UiId(0),
+                        style!(
+                            position: absolute,
+                            width: 100 %,
+                            bottom: 0 pt,
+                            height: 64 pt,
+                            flex_direction: row,
+                            align_items: center,
+                            justify_content: space_around,
+                            background: Some([0.12, 0.14, 0.18, 0.96]),
+                        ),
+                        |ui| {
+                            for (i, id) in [TAB0, TAB1, TAB2, TAB3].into_iter().enumerate() {
+                                let hot = ui.hovered(id);
+                                ui.node(
+                                    id,
+                                    style!(
+                                        width: 40 pt,
+                                        height: 40 pt,
+                                        background: Some(tab_color(i as u32, hot)),
+                                    ),
+                                    |_| {},
+                                );
+                            }
+                        },
+                    );
+                });
+            },
+        );
     }
 }
 

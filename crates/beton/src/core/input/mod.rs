@@ -5,11 +5,12 @@ use std::collections::HashSet;
 /// Physical key code from `winit`. The crate pins the `winit` major version.
 pub use winit::keyboard::KeyCode as Key;
 
-/// Keys held, keys that went down this frame, and the cursor position.
+/// Keys held, keys that went down / up this frame, and the cursor position.
 #[derive(Debug, Default)]
 pub struct Input {
     down: HashSet<Key>,
     pressed: HashSet<Key>,
+    released: HashSet<Key>,
     /// Cursor in physical framebuffer pixels (origin top-left, Y down).
     cursor_px: [f32; 2],
     /// True when the cursor is over the window.
@@ -23,6 +24,7 @@ pub struct Input {
 impl Input {
     pub(crate) fn begin_frame(&mut self) {
         self.pressed.clear();
+        self.released.clear();
         self.pointer_pressed = false;
     }
 
@@ -31,8 +33,8 @@ impl Input {
             if self.down.insert(key) {
                 self.pressed.insert(key);
             }
-        } else {
-            self.down.remove(&key);
+        } else if self.down.remove(&key) {
+            self.released.insert(key);
         }
     }
 
@@ -64,6 +66,11 @@ impl Input {
     /// True if the key went down this frame.
     pub fn pressed(&self, key: Key) -> bool {
         self.pressed.contains(&key)
+    }
+
+    /// True if the key went up this frame.
+    pub fn released(&self, key: Key) -> bool {
+        self.released.contains(&key)
     }
 
     /// True while the left mouse button is held.

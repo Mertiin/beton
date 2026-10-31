@@ -26,12 +26,20 @@ image = { workspace = true }
 bytemuck = { workspace = true }
 web-time = { workspace = true }
 fontdue = { workspace = true }
+yoga-rs = { workspace = true }
 rapier2d = { workspace = true, optional = true }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+[target.'cfg(all(not(target_arch = "wasm32"), windows))'.dependencies]
 pollster = { workspace = true }
 rodio = { workspace = true }
 tungstenite = { workspace = true }
+str0m = { workspace = true, features = ["wincrypto"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(windows)))'.dependencies]
+pollster = { workspace = true }
+rodio = { workspace = true }
+tungstenite = { workspace = true }
+str0m = { workspace = true, features = ["aws-lc-rs"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 rodio = { workspace = true, features = ["wasm-bindgen"] }
@@ -49,5 +57,15 @@ web-sys = { workspace = true, features = [
     "BinaryType",
     "CloseEvent",
     "ErrorEvent",
+    "RtcPeerConnection",
+    "RtcConfiguration",
+    "RtcSessionDescription",
+    "RtcSessionDescriptionInit",
+    "RtcSdpType",
+    "RtcIceCandidate",
+    "RtcIceCandidateInit",
+    "RtcPeerConnectionIceEvent",
+    "RtcDataChannel",
+    "RtcDataChannelEvent",
 ] }
 console_error_panic_hook = { workspace = true }

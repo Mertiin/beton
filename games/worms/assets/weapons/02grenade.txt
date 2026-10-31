@@ -1,0 +1,16 @@
+blast_radius = 20
+damage = 48
+speed = 150
+gravity = 1.1
+trail = 18
+fragments = 14
+fragment_speed = 70
+fragment_life = 0.4
+effect = glow
+blend = add
+behavior = fuse
+ammo = 3
+fuse = 2.4
+pellets = 1
+spread = 0.2
+children = 0

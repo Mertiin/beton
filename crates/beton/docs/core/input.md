@@ -12,6 +12,7 @@ The OS delivers irregular key events. Games want polling-style questions inside 
 |-----|----------|----------|
 | `input.down(Key::Space)` | Is Space currently held? | Move while held, charge a shot |
 | `input.pressed(Key::Space)` | Did Space transition up→down **this frame**? | Jump, flap, confirm, pause toggle |
+| `input.released(Key::Space)` | Did Space transition down→up **this frame**? | Fire a charged shot on release |
 
 Using `down` for a flap makes the bird rocket skyward for as long as you hold the key. Using `pressed` fires once per keystroke — what Flappy wants.
 
@@ -20,16 +21,17 @@ Using `down` for a flap makes the bird rocket skyward for as long as you hold th
 Internally:
 
 ```text
-down:    HashSet of keys currently held
-pressed: HashSet of keys that became held since last begin_frame
+down:     HashSet of keys currently held
+pressed:  HashSet of keys that became held since last begin_frame
+released: HashSet of keys that became released since last begin_frame
 ```
 
 On a keyboard event:
 
 - **Press:** if the key was not already in `down`, insert into both `down` and `pressed` (so auto-repeat from the OS does not spam `pressed`).
-- **Release:** remove from `down`.
+- **Release:** if the key was in `down`, remove it and insert into `released`.
 
-After your `update` and the draw, the engine calls `begin_frame()`, which **clears `pressed` only**. `down` stays accurate across frames.
+After your `update` and the draw, the engine calls `begin_frame()`, which **clears `pressed` and `released`**. `down` stays accurate across frames.
 
 ### Why clear pressed after the frame?
 

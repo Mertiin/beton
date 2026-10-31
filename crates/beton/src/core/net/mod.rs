@@ -3,10 +3,13 @@
 //! Games own the payload bytes. The engine does not replicate objects or encrypt
 //! traffic — this is a LAN sample pipe. Events last one frame (same rule as
 //! [`Input`](crate::Input)): read [`Net::events`] every `update` or they are gone.
+//!
+//! Signaling uses a WebSocket; game bytes ride WebRTC data channels (reliable
+//! and unreliable).
 
 use crate::core::platform::NetDriver;
 
-/// Cap on one binary WebSocket payload (bytes). Larger sends fail.
+/// Cap on one binary payload (bytes). Larger sends fail.
 pub const MAX_PAYLOAD: usize = 16 * 1024;
 
 /// Maximum remote peers a host keeps. Further accepts are closed.
@@ -42,17 +45,24 @@ pub enum NetRole {
 pub enum NetEvent {
     /// Host bound successfully. `port` is the local listen port (useful when `0` was requested).
     Listening {
-        /// Bound TCP port.
+        /// Bound TCP port (signaling WebSocket).
         port: u16,
     },
-    /// Client finished the WebSocket handshake.
+    /// Client finished the WebRTC handshake (both data channels open).
     Connected,
-    /// A remote peer is ready (host only for new clients).
+    /// A remote peer is ready (host only for new clients; both channels open).
     PeerJoined(PeerId),
     /// A remote peer closed or was dropped.
     PeerLeft(PeerId),
-    /// Binary payload from `from`.
+    /// Reliable ordered payload from `from`.
     Message {
+        /// Sender peer id.
+        from: PeerId,
+        /// Opaque game bytes (at most [`MAX_PAYLOAD`]).
+        bytes: Vec<u8>,
+    },
+    /// Unreliable unordered payload from `from`. Lost datagrams are silent.
+    Datagram {
         /// Sender peer id.
         from: PeerId,
         /// Opaque game bytes (at most [`MAX_PAYLOAD`]).
@@ -60,7 +70,7 @@ pub enum NetEvent {
     },
     /// The local socket is gone (client lost host, or host stopped).
     Disconnected,
-    /// Inbound queue overflowed; at least one `Message` was dropped.
+    /// Inbound queue overflowed; at least one `Message` or `Datagram` was dropped.
     Overflow,
 }
 
@@ -101,7 +111,9 @@ impl Net {
         Ok(())
     }
 
-    /// Dial a `ws://host:port` URL. Fails if already open.
+    /// Dial a `ws://host:port` URL (signaling). Fails if already open.
+    ///
+    /// Game bytes use WebRTC after the handshake; [`NetEvent::Connected`] fires when ready.
     pub fn connect(&mut self, url: &str) -> Result<(), String> {
         if self.driver.is_some() {
             return Err("net already open; call close first".into());
@@ -121,8 +133,19 @@ impl Net {
         self.frame_events.clear();
     }
 
-    /// Send opaque bytes to one peer. Clients may only send to [`PeerId::HOST`].
+    /// Send opaque bytes to one peer on the reliable channel.
+    /// Clients may only send to [`PeerId::HOST`].
     pub fn send(&mut self, to: PeerId, bytes: &[u8]) -> Result<(), String> {
+        self.send_inner(to, bytes, false)
+    }
+
+    /// Send opaque bytes to one peer on the unreliable unordered channel.
+    /// Clients may only send to [`PeerId::HOST`].
+    pub fn send_unreliable(&mut self, to: PeerId, bytes: &[u8]) -> Result<(), String> {
+        self.send_inner(to, bytes, true)
+    }
+
+    fn send_inner(&mut self, to: PeerId, bytes: &[u8], unreliable: bool) -> Result<(), String> {
         if bytes.len() > MAX_PAYLOAD {
             return Err(format!(
                 "payload {} bytes exceeds MAX_PAYLOAD ({MAX_PAYLOAD})",
@@ -139,11 +162,24 @@ impl Net {
         let Some(driver) = self.driver.as_mut() else {
             return Err("net is offline".into());
         };
-        driver.send(to, bytes.to_vec())
+        if unreliable {
+            driver.send_unreliable(to, bytes.to_vec())
+        } else {
+            driver.send(to, bytes.to_vec())
+        }
     }
 
-    /// Send the same bytes to every remote peer. Host only.
+    /// Send the same bytes to every remote peer on the reliable channel. Host only.
     pub fn broadcast(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.broadcast_inner(bytes, false)
+    }
+
+    /// Send the same bytes to every remote peer on the unreliable channel. Host only.
+    pub fn broadcast_unreliable(&mut self, bytes: &[u8]) -> Result<(), String> {
+        self.broadcast_inner(bytes, true)
+    }
+
+    fn broadcast_inner(&mut self, bytes: &[u8], unreliable: bool) -> Result<(), String> {
         if bytes.len() > MAX_PAYLOAD {
             return Err(format!(
                 "payload {} bytes exceeds MAX_PAYLOAD ({MAX_PAYLOAD})",
@@ -158,7 +194,11 @@ impl Net {
         let Some(driver) = self.driver.as_mut() else {
             return Err("net is offline".into());
         };
-        driver.broadcast(bytes.to_vec())
+        if unreliable {
+            driver.broadcast_unreliable(bytes.to_vec())
+        } else {
+            driver.broadcast(bytes.to_vec())
+        }
     }
 
     /// Events for this frame only. Empty after the frame ends if unread.

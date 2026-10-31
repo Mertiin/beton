@@ -20,6 +20,7 @@ struct VsOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
+    @location(2) local_uv: vec2<f32>,
 }
 
 @vertex
@@ -38,6 +39,7 @@ fn vs(in: VsIn) -> VsOut {
     out.clip = camera.view_proj * vec4<f32>(world_xy, in.center.z, 1.0);
     out.uv = vec2<f32>(u, v);
     out.color = in.color;
+    out.local_uv = in.corner_uv;
     return out;
 }
 

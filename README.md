@@ -25,6 +25,8 @@ cargo run --release -p netplay
 cargo run --release -p tetris
 cargo run --release -p ui
 cargo run --release -p brutal-pixels
+cargo run --release -p tanks
+cargo run --release -p worms
 ```
 
 Web (from `games/brutal-pixels`):
@@ -41,6 +43,8 @@ trunk serve --release
 - **tetris** — classic Tetris (7-bag, hold, ghost). Arrows/WASD move, Up/W/X rotate, Z CCW, Space hard drop, C/Shift hold, R restarts. Board logic is isolated for a later battle-royale mode.
 - **ui** — screen UI demo: HUD with image/count hover, a button opens a dimmed settings panel, Back closes it.
 - **brutal-pixels** — side-view tower auto-battler. Buy modules from the bottom bar onto your tower, FIGHT for auto combat (guns + walking units). HP resets each round; loadout persists. Click a mounted module twice to sell. R restarts after a win or loss.
+- **tanks** — hotseat two-tank duel. START from the menu. Arrows/WASD move and aim (fuel-limited), 1–9 pick a weapon, hold Space to charge and release to fire. Shells dig Liero-style dirt. R rebuilds the map. Web: `cd games/tanks && trunk serve --release`.
+- **worms** — two teams of four worms, hotseat or online. START from the menu (or Enter). A/D or arrows walk, W jumps, Up/Down aim, hold Space to charge and release to fire (shotgun fires on press), 1–4 or the badge row picks a weapon, Q skips, R restarts. HOST waits for up to three joiners on port 7778; JOIN dials an address. Or `worms host [PORT]` / `worms connect HOST:PORT`. The desktop host runs the match. A browser can join (`cd games/worms && trunk serve --release`) and cannot host.
 
 Escape or the window close button exits.
 
@@ -76,7 +80,7 @@ trunk build --release
 
 Artifacts land in `target/twenty48-web/` or `games/flappy/dist/`.
 
-Pushes to `main` publish flappy, 2048, physics, netplay, tetris, and brutal-pixels to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay on Pages is a client only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
+Pushes to `main` publish flappy, 2048, physics, netplay, tetris, brutal-pixels, and worms to [GitHub Pages](https://mertiin.github.io/beton/). The repository Pages source must be **GitHub Actions**. Netplay and worms on Pages are clients only — run a desktop host locally. Zombies and gallery stay desktop-only; they load files from beside the executable.
 
 Click the canvas so it has keyboard focus. Escape does not quit on the web (it would leave a dead page). On flappy, click first so audio can start (browser gesture rule), then Space flaps. File assets listed in `Game::assets` are fetched over HTTP (Trunk copies `games/flappy/assets/` into the dist).
 

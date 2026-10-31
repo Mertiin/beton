@@ -1,4 +1,4 @@
-//! Native loopback: host, connect, exchange one binary frame, then clean shutdown.
+//! Native loopback: host, connect, exchange reliable + unreliable frames, then clean shutdown.
 
 #![cfg(not(target_arch = "wasm32"))]
 
@@ -45,10 +45,17 @@ fn host_client_exchange_and_drop() {
         .connect(&format!("ws://127.0.0.1:{port}"))
         .expect("connect");
 
-    let _ = wait_for(&mut client, Instant::now() + Duration::from_secs(2), |ev| {
+    // ICE + DTLS is slower than a plain WebSocket handshake.
+    let client_ready = wait_for(&mut client, Instant::now() + Duration::from_secs(15), |ev| {
         ev.iter().any(|e| matches!(e, NetEvent::Connected))
     });
-    let host_events = wait_for(&mut host, Instant::now() + Duration::from_secs(2), |ev| {
+    assert!(
+        client_ready
+            .iter()
+            .any(|e| matches!(e, NetEvent::Connected)),
+        "Connected"
+    );
+    let host_events = wait_for(&mut host, Instant::now() + Duration::from_secs(15), |ev| {
         ev.iter().any(|e| matches!(e, NetEvent::PeerJoined(_)))
     });
     let peer = host_events
@@ -65,7 +72,7 @@ fn host_client_exchange_and_drop() {
         .send(PeerId::HOST, &payload)
         .expect("client send");
 
-    let host_msg = wait_for(&mut host, Instant::now() + Duration::from_secs(2), |ev| {
+    let host_msg = wait_for(&mut host, Instant::now() + Duration::from_secs(5), |ev| {
         ev.iter().any(|e| matches!(e, NetEvent::Message { .. }))
     });
     let got = host_msg
@@ -79,7 +86,7 @@ fn host_client_exchange_and_drop() {
     assert_eq!(got.1, payload);
 
     host.send(peer, b"pong").expect("host send");
-    let client_msg = wait_for(&mut client, Instant::now() + Duration::from_secs(2), |ev| {
+    let client_msg = wait_for(&mut client, Instant::now() + Duration::from_secs(5), |ev| {
         ev.iter().any(|e| matches!(e, NetEvent::Message { .. }))
     });
     assert!(client_msg.iter().any(|e| matches!(
@@ -88,6 +95,30 @@ fn host_client_exchange_and_drop() {
             from: PeerId::HOST,
             bytes
         } if bytes == b"pong"
+    )));
+
+    let dg = b"snap".to_vec();
+    client
+        .send_unreliable(PeerId::HOST, &dg)
+        .expect("client datagram");
+    let host_dg = wait_for(&mut host, Instant::now() + Duration::from_secs(5), |ev| {
+        ev.iter().any(|e| matches!(e, NetEvent::Datagram { .. }))
+    });
+    assert!(host_dg.iter().any(|e| matches!(
+        e,
+        NetEvent::Datagram { from, bytes } if *from == peer && bytes == &dg
+    )));
+
+    host.broadcast_unreliable(b"state").expect("host broadcast dg");
+    let client_dg = wait_for(&mut client, Instant::now() + Duration::from_secs(5), |ev| {
+        ev.iter().any(|e| matches!(e, NetEvent::Datagram { .. }))
+    });
+    assert!(client_dg.iter().any(|e| matches!(
+        e,
+        NetEvent::Datagram {
+            from: PeerId::HOST,
+            bytes
+        } if bytes == b"state"
     )));
 
     // Drop must join every thread without hanging.

@@ -50,6 +50,10 @@ Validates and stores the bytes. GPU upload waits until first use. Requirements:
 - `rgba.len() == width * height * 4`
 - Row-major RGBA8
 
+## `Gfx::update_texture(id, rgba)`
+
+Replaces the pixels of a texture created with `create_texture`. The new buffer must be the same width × height × 4. Path-backed textures are rejected. The retained CPU source is overwritten so a later unload / re-upload keeps the new image. If the texture is already resident, the GPU is updated immediately.
+
 ## `Gfx::pin(id)`
 
 ```rust

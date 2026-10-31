@@ -38,6 +38,32 @@ pub(super) async fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
     Ok(js_sys::Uint8Array::new(&buf).to_vec())
 }
 
+/// List files under `dir` using `{dir}/_index.txt` (one relative path per line).
+pub(super) async fn list_asset_dir(dir: &str) -> Result<Vec<String>, String> {
+    let index_path = format!("{}/_index.txt", dir.trim_end_matches('/'));
+    let bytes = read_bytes(&index_path).await?;
+    let text = String::from_utf8(bytes)
+        .map_err(|err| format!("failed to decode {index_path}: {err}"))?;
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line == "_index.txt" {
+            continue;
+        }
+        // Index may list bare names or paths already under dir.
+        if line.contains('/') {
+            out.push(line.to_string());
+        } else {
+            out.push(format!("{}/{}", dir.trim_end_matches('/'), line));
+        }
+    }
+    out.sort();
+    Ok(out)
+}
+
 pub(super) fn window_attributes(title: &str, width: u32, height: u32) -> WindowAttributes {
     WindowAttributes::default()
         .with_title(title)

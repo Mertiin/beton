@@ -1,0 +1,6 @@
+[build]
+target = "index.html"
+dist = "../../target/worms-web"
+
+[watch]
+ignore = ["../../target"]

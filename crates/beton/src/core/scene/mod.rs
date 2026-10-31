@@ -4,13 +4,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use crate::core::math::Vec3;
-use crate::core::render::{Gfx, TextureId};
+use crate::core::render::{Gfx, ShaderId, TextureId};
 
 /// A textured quad in world space.
 #[derive(Clone, Debug)]
 pub struct Sprite {
     /// Texture to sample.
     pub texture: TextureId,
+    /// Pipeline that shades this quad. Defaults to the built-in textured sprite.
+    pub shader: ShaderId,
     /// World-space center.
     pub center: Vec3,
     /// Width and height in world units.
@@ -24,10 +26,11 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    /// Full UV, no rotation, and white tint.
+    /// Full UV, no rotation, white tint, and the built-in sprite shader.
     pub fn new(texture: TextureId, center: Vec3, size: [f32; 2]) -> Self {
         Self {
             texture,
+            shader: ShaderId::SPRITE,
             center,
             size,
             rotation: 0.0,
@@ -346,6 +349,7 @@ impl Scene {
             let cy = top_y_up - (offset[1] + size[1] * 0.5);
             self.sprites.push(Sprite {
                 texture: font.texture,
+                shader: ShaderId::SPRITE,
                 center: Vec3::new(cx, cy, origin.z),
                 size,
                 rotation: 0.0,

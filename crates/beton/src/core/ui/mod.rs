@@ -1,6 +1,17 @@
 //! Screen-fixed immediate-mode UI: boxes, images, and bitmap text.
+//!
+//! Layout is [Yoga](https://www.yogalayout.dev/) via the pure-Rust `yoga-rs` crate.
+
+mod style;
+
+pub use style::{Fit, Length, Style};
 
 use std::collections::HashSet;
+
+use yoga::{
+    Align, BoxSizing, Direction as YogaDirection, Edge, FlexDirection, Gutter, NodeRef,
+    Size as YogaSize,
+};
 
 use crate::core::math::Vec3;
 use crate::core::render::TextureId;
@@ -9,135 +20,6 @@ use crate::core::scene::{Font, Sprite};
 /// Stable id for hover and click queries across frames.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct UiId(pub u32);
-
-/// How children are laid out.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Display {
-    /// Stack children downward; stretch auto widths.
-    #[default]
-    Block,
-    /// One-line flex along [`Style::direction`].
-    Flex,
-}
-
-/// Main axis for flex layout.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Direction {
-    /// Left to right.
-    #[default]
-    Row,
-    /// Top to bottom.
-    Column,
-}
-
-/// Width or height.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub enum Size {
-    /// Content size (or stretch in block / flex cross when align is stretch).
-    #[default]
-    Auto,
-    /// Fixed pixels.
-    Px(f32),
-    /// Fraction of the parent content box (`1.0` = 100%).
-    Pct(f32),
-    /// Share leftover main-axis space in a flex parent; stretch on the cross axis.
-    Fill,
-}
-
-/// Main-axis placement of flex children.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Justify {
-    /// Pack toward the start of the main axis.
-    #[default]
-    Start,
-    /// Center along the main axis.
-    Center,
-    /// Pack toward the end of the main axis.
-    End,
-    /// Put free space between children.
-    SpaceBetween,
-}
-
-/// Cross-axis placement of flex children.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Align {
-    /// Align to the start of the cross axis.
-    Start,
-    /// Center on the cross axis.
-    Center,
-    /// Align to the end of the cross axis.
-    End,
-    /// Stretch `Auto` / `Fill` cross sizes to the line.
-    #[default]
-    Stretch,
-}
-
-/// How an image fills its content box.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum Fit {
-    /// Stretch to the content box.
-    #[default]
-    Fill,
-    /// Fit inside while keeping aspect ratio.
-    Contain,
-    /// Cover the box while keeping aspect ratio (may clip).
-    Cover,
-}
-
-/// Layout and paint for one node.
-#[derive(Clone, Debug)]
-pub struct Style {
-    /// Block or flex.
-    pub display: Display,
-    /// Flex main axis.
-    pub direction: Direction,
-    /// Border-box width.
-    pub width: Size,
-    /// Border-box height.
-    pub height: Size,
-    /// Outside the border box: top, right, bottom, left.
-    pub margin: [f32; 4],
-    /// Inside the border box: top, right, bottom, left.
-    pub padding: [f32; 4],
-    /// Gap between children.
-    pub gap: f32,
-    /// Flex main-axis packing.
-    pub justify: Justify,
-    /// Flex cross-axis alignment.
-    pub align: Align,
-    /// Optional solid fill (uses the engine white texture).
-    pub background: Option<[f32; 4]>,
-    /// Text color / image tint.
-    pub color: [f32; 4],
-    /// Image fit mode.
-    pub fit: Fit,
-}
-
-impl Default for Style {
-    fn default() -> Self {
-        Self {
-            display: Display::Block,
-            direction: Direction::Row,
-            width: Size::Auto,
-            height: Size::Auto,
-            margin: [0.0; 4],
-            padding: [0.0; 4],
-            gap: 0.0,
-            justify: Justify::Start,
-            align: Align::Stretch,
-            background: None,
-            color: [1.0, 1.0, 1.0, 1.0],
-            fit: Fit::Fill,
-        }
-    }
-}
-
-impl Style {
-    /// Same value on all four edges.
-    pub fn edges(v: f32) -> [f32; 4] {
-        [v, v, v, v]
-    }
-}
 
 #[derive(Clone, Copy, Debug)]
 struct Rect {
@@ -150,14 +32,6 @@ struct Rect {
 impl Rect {
     fn contains(self, x: f32, y: f32) -> bool {
         x >= self.left && y >= self.top && x < self.left + self.width && y < self.top + self.height
-    }
-
-    fn right(self) -> f32 {
-        self.left + self.width
-    }
-
-    fn bottom(self) -> f32 {
-        self.top + self.height
     }
 }
 
@@ -292,7 +166,7 @@ impl Ui {
         index
     }
 
-    /// Lay out the tree and emit sprites. `texture_size` returns pixel size or `(0,0)`.
+    /// Lay out the tree with Yoga and emit sprites. `texture_size` returns pixel size or `(0,0)`.
     pub(crate) fn layout(
         &mut self,
         fb_size: [f32; 2],
@@ -301,60 +175,58 @@ impl Ui {
     ) {
         self.hit_rects.clear();
         self.sprites.clear();
+        if self.nodes.is_empty() {
+            return;
+        }
+
         let roots: Vec<usize> = (0..self.nodes.len())
-            .filter(|&i| {
-                !self
-                    .nodes
-                    .iter()
-                    .any(|n| n.children.contains(&i))
-            })
+            .filter(|&i| !self.nodes.iter().any(|n| n.children.contains(&i)))
             .collect();
 
-        let root_content = Rect {
-            left: 0.0,
-            top: 0.0,
-            width: fb_size[0].max(1.0),
-            height: fb_size[1].max(1.0),
-        };
+        let cfg = yoga::config::new_config();
+        cfg.borrow_mut().set_use_web_defaults(false);
+        cfg.borrow_mut().set_point_scale_factor(0.0);
 
-        let mut y = 0.0;
-        for &root in &roots {
-            let measured = measure_node(&self.nodes, root, Some(root_content.width), &mut texture_size);
-            let stretch_w = matches!(self.nodes[root].style.display, Display::Block)
-                && matches!(self.nodes[root].kind, Kind::Container);
-            let w = resolve_axis(
-                self.nodes[root].style.width,
-                Some(root_content.width),
-                measured.width,
-                stretch_w,
-            );
-            let h = resolve_axis(
-                self.nodes[root].style.height,
-                Some(root_content.height),
-                measured.height,
-                false,
-            );
-            let style = &self.nodes[root].style;
-            let left = root_content.left + style.margin[3];
-            let top = y + style.margin[0];
-            let border = Rect {
-                left,
-                top,
-                width: w,
-                height: h,
+        let root = NodeRef::with_config(cfg.clone());
+        root.set_style_box_sizing(BoxSizing::BorderBox);
+        root.set_style_flex_direction(FlexDirection::Column);
+        root.set_style_align_items(Align::FlexStart);
+        root.set_style_width(fb_size[0].max(1.0));
+        root.set_style_height(fb_size[1].max(1.0));
+
+        // Keep NodeRefs alive for the layout pass.
+        let mut yoga_nodes: Vec<Option<NodeRef>> = vec![None; self.nodes.len()];
+
+        for (i, &idx) in roots.iter().enumerate() {
+            let yn = build_yoga_node(&self.nodes, idx, &cfg, &mut texture_size, &mut yoga_nodes);
+            root.insert_child(&yn, i);
+            yoga_nodes[idx] = Some(yn);
+        }
+
+        root.calculate_layout(
+            fb_size[0].max(1.0),
+            fb_size[1].max(1.0),
+            YogaDirection::LTR,
+        );
+
+        for &idx in &roots {
+            let Some(yn) = yoga_nodes[idx].as_ref() else {
+                continue;
             };
-            arrange_node(
+            emit_node(
                 &self.nodes,
-                root,
-                border,
+                idx,
+                yn,
+                0.0,
+                0.0,
                 &[],
                 fb_size,
                 white,
                 &mut texture_size,
                 &mut self.hit_rects,
                 &mut self.sprites,
+                &yoga_nodes,
             );
-            y = border.bottom() + style.margin[2];
         }
     }
 
@@ -363,184 +235,183 @@ impl Ui {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-struct Measured {
-    /// Border-box preferred width (content + padding), ignoring margin.
-    width: f32,
-    /// Border-box preferred height.
-    height: f32,
-}
-
-fn pad_x(style: &Style) -> f32 {
-    style.padding[1] + style.padding[3]
-}
-
-fn pad_y(style: &Style) -> f32 {
-    style.padding[0] + style.padding[2]
-}
-
-fn resolve_axis(size: Size, parent: Option<f32>, intrinsic: f32, stretch_auto: bool) -> f32 {
-    match size {
-        Size::Px(v) => v.max(0.0),
-        Size::Pct(p) => match parent {
-            Some(parent) if parent.is_finite() && parent > 0.0 => (parent * p).max(0.0),
-            _ => intrinsic.max(0.0),
-        },
-        Size::Fill => match parent {
-            Some(parent) => parent.max(0.0),
-            None => intrinsic.max(0.0),
-        },
-        Size::Auto => {
-            if stretch_auto {
-                match parent {
-                    Some(parent) => parent.max(0.0),
-                    None => intrinsic.max(0.0),
-                }
-            } else {
-                intrinsic.max(0.0)
-            }
-        }
-    }
-}
-
-fn measure_node(
+fn build_yoga_node(
     nodes: &[Node],
     index: usize,
-    parent_content_w: Option<f32>,
+    cfg: &yoga::ConfigRef,
     texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
-) -> Measured {
+    yoga_nodes: &mut [Option<NodeRef>],
+) -> NodeRef {
     let node = &nodes[index];
-    let style = &node.style;
+    let yn = NodeRef::with_config(cfg.clone());
+    yn.set_style_box_sizing(BoxSizing::BorderBox);
+    apply_style(&yn, &node.style);
 
-    let content_intrinsic = match &node.kind {
+    match &node.kind {
         Kind::Text {
             font,
             glyph_size,
             text,
         } => {
             let size = font.measure(*glyph_size, text);
-            Measured {
-                width: size[0],
-                height: size[1],
-            }
+            let w = size[0];
+            let h = size[1];
+            yn.set_measure_fn(move |_n, _aw, _wm, _ah, _hm| YogaSize {
+                width: w,
+                height: h,
+            });
         }
         Kind::Image { texture } => {
             let (tw, th) = texture_size(*texture);
-            Measured {
-                width: tw as f32,
-                height: th as f32,
+            let uv = node.style.uv;
+            let cell_w = tw as f32 * (uv[2] - uv[0]).abs().max(0.0);
+            let cell_h = th as f32 * (uv[3] - uv[1]).abs().max(0.0);
+            yn.set_measure_fn(move |_n, _aw, _wm, _ah, _hm| YogaSize {
+                width: cell_w,
+                height: cell_h,
+            });
+        }
+        Kind::Container => {
+            for (i, &child) in node.children.iter().enumerate() {
+                let child_yn =
+                    build_yoga_node(nodes, child, cfg, texture_size, yoga_nodes);
+                yn.insert_child(&child_yn, i);
+                yoga_nodes[child] = Some(child_yn);
             }
         }
-        Kind::Container => measure_children(nodes, index, parent_content_w, texture_size),
-    };
-
-    let mut width = match style.width {
-        Size::Px(v) => v.max(0.0),
-        Size::Pct(p) => match parent_content_w {
-            Some(pw) if pw > 0.0 => (pw * p).max(0.0),
-            _ => content_intrinsic.width + pad_x(style),
-        },
-        Size::Fill | Size::Auto => content_intrinsic.width + pad_x(style),
-    };
-    let mut height = match style.height {
-        Size::Px(v) => v.max(0.0),
-        // Percent height needs a definite parent height; measure only has width.
-        Size::Pct(_p) => content_intrinsic.height + pad_y(style),
-        Size::Fill | Size::Auto => content_intrinsic.height + pad_y(style),
-    };
-
-    // When width/height are definite from Px, still ensure padding fits.
-    width = width.max(pad_x(style));
-    height = height.max(pad_y(style));
-
-    Measured { width, height }
-}
-
-fn measure_children(
-    nodes: &[Node],
-    index: usize,
-    parent_content_w: Option<f32>,
-    texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
-) -> Measured {
-    let node = &nodes[index];
-    let style = &node.style;
-    let child_parent_w = match style.width {
-        Size::Px(v) => Some((v - pad_x(style)).max(0.0)),
-        Size::Pct(p) => parent_content_w.map(|pw| (pw * p - pad_x(style)).max(0.0)),
-        Size::Auto | Size::Fill => parent_content_w.map(|pw| (pw - pad_x(style)).max(0.0)),
-    };
-
-    if node.children.is_empty() {
-        return Measured::default();
     }
 
-    match style.display {
-        Display::Block => {
-            let mut w = 0.0f32;
-            let mut h = 0.0f32;
-            let n = node.children.len();
-            for (i, &child) in node.children.iter().enumerate() {
-                let m = measure_node(nodes, child, child_parent_w, texture_size);
-                let cs = &nodes[child].style;
-                let child_w = m.width + cs.margin[1] + cs.margin[3];
-                let child_h = m.height + cs.margin[0] + cs.margin[2];
-                w = w.max(child_w);
-                h += child_h;
-                if i + 1 < n {
-                    h += style.gap;
-                }
-            }
-            Measured { width: w, height: h }
-        }
-        Display::Flex => match style.direction {
-            Direction::Row => {
-                let mut w = 0.0f32;
-                let mut h = 0.0f32;
-                let n = node.children.len();
-                for (i, &child) in node.children.iter().enumerate() {
-                    let m = measure_node(nodes, child, child_parent_w, texture_size);
-                    let cs = &nodes[child].style;
-                    w += m.width + cs.margin[1] + cs.margin[3];
-                    h = h.max(m.height + cs.margin[0] + cs.margin[2]);
-                    if i + 1 < n {
-                        w += style.gap;
-                    }
-                }
-                Measured { width: w, height: h }
-            }
-            Direction::Column => {
-                let mut w = 0.0f32;
-                let mut h = 0.0f32;
-                let n = node.children.len();
-                for (i, &child) in node.children.iter().enumerate() {
-                    let m = measure_node(nodes, child, child_parent_w, texture_size);
-                    let cs = &nodes[child].style;
-                    w = w.max(m.width + cs.margin[1] + cs.margin[3]);
-                    h += m.height + cs.margin[0] + cs.margin[2];
-                    if i + 1 < n {
-                        h += style.gap;
-                    }
-                }
-                Measured { width: w, height: h }
-            }
-        },
+    yn
+}
+
+fn apply_style(yn: &NodeRef, style: &Style) {
+    if let Some(w) = style.width {
+        apply_dim_width(yn, w);
+    }
+    if let Some(h) = style.height {
+        apply_dim_height(yn, h);
+    }
+    if let Some(flex) = style.flex {
+        yn.set_style_flex(flex);
+    }
+    if let Some(dir) = style.flex_direction {
+        yn.set_style_flex_direction(dir);
+    }
+    if let Some(align) = style.align_items {
+        yn.set_style_align_items(align);
+    }
+    if let Some(justify) = style.justify_content {
+        yn.set_style_justify_content(justify);
+    }
+    if let Some(pos) = style.position {
+        yn.set_style_position_type(pos);
+    }
+    apply_inset(yn, Edge::Top, style.top);
+    apply_inset(yn, Edge::Right, style.right);
+    apply_inset(yn, Edge::Bottom, style.bottom);
+    apply_inset(yn, Edge::Left, style.left);
+
+    apply_edge(yn, Edge::All, style.padding, EdgeKind::Padding);
+    apply_edge(yn, Edge::Top, style.padding_top, EdgeKind::Padding);
+    apply_edge(yn, Edge::Right, style.padding_right, EdgeKind::Padding);
+    apply_edge(yn, Edge::Bottom, style.padding_bottom, EdgeKind::Padding);
+    apply_edge(yn, Edge::Left, style.padding_left, EdgeKind::Padding);
+    apply_edge(yn, Edge::Horizontal, style.padding_inline, EdgeKind::Padding);
+    apply_edge(yn, Edge::Vertical, style.padding_vertical, EdgeKind::Padding);
+
+    apply_edge(yn, Edge::All, style.margin, EdgeKind::Margin);
+    apply_edge(yn, Edge::Top, style.margin_top, EdgeKind::Margin);
+    apply_edge(yn, Edge::Right, style.margin_right, EdgeKind::Margin);
+    apply_edge(yn, Edge::Bottom, style.margin_bottom, EdgeKind::Margin);
+    apply_edge(yn, Edge::Left, style.margin_left, EdgeKind::Margin);
+    apply_edge(yn, Edge::Horizontal, style.margin_inline, EdgeKind::Margin);
+    apply_edge(yn, Edge::Vertical, style.margin_vertical, EdgeKind::Margin);
+
+    apply_gap(yn, Gutter::All, style.gap);
+    apply_gap(yn, Gutter::Row, style.row_gap);
+    apply_gap(yn, Gutter::Column, style.column_gap);
+}
+
+fn apply_dim_width(yn: &NodeRef, len: Length) {
+    match len {
+        Length::Pt(v) => yn.set_style_width(v.max(0.0)),
+        Length::Pct(v) => yn.set_style_width_percent(v),
+        Length::Auto => yn.set_style_width_auto(),
+    }
+}
+
+fn apply_dim_height(yn: &NodeRef, len: Length) {
+    match len {
+        Length::Pt(v) => yn.set_style_height(v.max(0.0)),
+        Length::Pct(v) => yn.set_style_height_percent(v),
+        Length::Auto => yn.set_style_height_auto(),
+    }
+}
+
+fn apply_inset(yn: &NodeRef, edge: Edge, len: Option<Length>) {
+    let Some(len) = len else {
+        return;
+    };
+    match len {
+        Length::Pt(v) => yn.set_style_position(edge, v),
+        Length::Pct(v) => yn.set_style_position_percent(edge, v),
+        Length::Auto => yn.set_style_position_auto(edge),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum EdgeKind {
+    Padding,
+    Margin,
+}
+
+fn apply_edge(yn: &NodeRef, edge: Edge, len: Option<Length>, kind: EdgeKind) {
+    let Some(len) = len else {
+        return;
+    };
+    match (kind, len) {
+        (EdgeKind::Padding, Length::Pt(v)) => yn.set_style_padding(edge, v.max(0.0)),
+        (EdgeKind::Padding, Length::Pct(v)) => yn.set_style_padding_percent(edge, v),
+        (EdgeKind::Padding, Length::Auto) => {}
+        (EdgeKind::Margin, Length::Pt(v)) => yn.set_style_margin(edge, v),
+        (EdgeKind::Margin, Length::Pct(v)) => yn.set_style_margin_percent(edge, v),
+        (EdgeKind::Margin, Length::Auto) => yn.set_style_margin_auto(edge),
+    }
+}
+
+fn apply_gap(yn: &NodeRef, gutter: Gutter, len: Option<Length>) {
+    let Some(len) = len else {
+        return;
+    };
+    match len {
+        Length::Pt(v) => yn.set_style_gap(gutter, v.max(0.0)),
+        Length::Pct(v) => yn.set_style_gap_percent(gutter, v),
+        Length::Auto => {}
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn arrange_node(
+fn emit_node(
     nodes: &[Node],
     index: usize,
-    border: Rect,
+    yn: &NodeRef,
+    parent_left: f32,
+    parent_top: f32,
     ancestors: &[UiId],
     fb_size: [f32; 2],
     white: TextureId,
     texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
     hits: &mut Vec<HitEntry>,
     sprites: &mut Vec<Sprite>,
+    yoga_nodes: &[Option<NodeRef>],
 ) {
     let node = &nodes[index];
-    let style = &node.style;
+    let border = Rect {
+        left: parent_left + yn.layout_left(),
+        top: parent_top + yn.layout_top(),
+        width: yn.layout_width().max(0.0),
+        height: yn.layout_height().max(0.0),
+    };
 
     hits.push(HitEntry {
         id: node.id,
@@ -548,22 +419,29 @@ fn arrange_node(
         ancestors: ancestors.to_vec(),
     });
 
-    if let Some(bg) = style.background {
-        push_rect_sprite(sprites, white, border, fb_size, bg);
+    if let Some(bg) = node.style.background {
+        push_rect_sprite(sprites, white, border, fb_size, bg, [0.0, 0.0, 1.0, 1.0]);
     }
 
+    let pad_l = yn.layout_padding(Edge::Left);
+    let pad_t = yn.layout_padding(Edge::Top);
+    let pad_r = yn.layout_padding(Edge::Right);
+    let pad_b = yn.layout_padding(Edge::Bottom);
     let content = Rect {
-        left: border.left + style.padding[3],
-        top: border.top + style.padding[0],
-        width: (border.width - pad_x(style)).max(0.0),
-        height: (border.height - pad_y(style)).max(0.0),
+        left: border.left + pad_l,
+        top: border.top + pad_t,
+        width: (border.width - pad_l - pad_r).max(0.0),
+        height: (border.height - pad_t - pad_b).max(0.0),
     };
 
     match &node.kind {
         Kind::Image { texture } => {
             let (tw, th) = texture_size(*texture);
-            let dest = fit_rect(content, tw as f32, th as f32, style.fit);
-            push_rect_sprite(sprites, *texture, dest, fb_size, style.color);
+            let uv = node.style.uv;
+            let cell_w = tw as f32 * (uv[2] - uv[0]).abs().max(0.0);
+            let cell_h = th as f32 * (uv[3] - uv[1]).abs().max(0.0);
+            let dest = fit_rect(content, cell_w, cell_h, node.style.fit);
+            push_rect_sprite(sprites, *texture, dest, fb_size, node.style.color, uv);
         }
         Kind::Text {
             font,
@@ -574,7 +452,7 @@ fn arrange_node(
                 sprites,
                 font,
                 *glyph_size,
-                style.color,
+                node.style.color,
                 text,
                 content.left,
                 content.top + content.height * 0.5,
@@ -584,335 +462,27 @@ fn arrange_node(
         Kind::Container => {
             let mut next_ancestors = ancestors.to_vec();
             next_ancestors.push(node.id);
-            arrange_children(
-                nodes,
-                index,
-                content,
-                &next_ancestors,
-                fb_size,
-                white,
-                texture_size,
-                hits,
-                sprites,
-            );
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn arrange_children(
-    nodes: &[Node],
-    index: usize,
-    content: Rect,
-    ancestors: &[UiId],
-    fb_size: [f32; 2],
-    white: TextureId,
-    texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
-    hits: &mut Vec<HitEntry>,
-    sprites: &mut Vec<Sprite>,
-) {
-    let node = &nodes[index];
-    let style = &node.style;
-    if node.children.is_empty() {
-        return;
-    }
-
-    match style.display {
-        Display::Block => {
-            let mut y = content.top;
-            let n = node.children.len();
-            for (i, &child) in node.children.iter().enumerate() {
-                let cs = &nodes[child].style;
-                let measured = measure_node(nodes, child, Some(content.width), texture_size);
-                let avail_w = (content.width - cs.margin[1] - cs.margin[3]).max(0.0);
-                let w = resolve_axis(cs.width, Some(avail_w), measured.width, true);
-                let h = resolve_axis(cs.height, None, measured.height, false);
-                let border = Rect {
-                    left: content.left + cs.margin[3],
-                    top: y + cs.margin[0],
-                    width: w,
-                    height: h,
+            for &child in &node.children {
+                let Some(child_yn) = yoga_nodes[child].as_ref() else {
+                    continue;
                 };
-                arrange_node(
+                // Yoga's layout_left/top are relative to the parent's border box
+                // (padding is already baked into those offsets).
+                emit_node(
                     nodes,
                     child,
-                    border,
-                    ancestors,
+                    child_yn,
+                    border.left,
+                    border.top,
+                    &next_ancestors,
                     fb_size,
                     white,
                     texture_size,
                     hits,
                     sprites,
+                    yoga_nodes,
                 );
-                y = border.bottom() + cs.margin[2];
-                if i + 1 < n {
-                    y += style.gap;
-                }
             }
-        }
-        Display::Flex => match style.direction {
-            Direction::Row => arrange_flex_row(
-                nodes,
-                index,
-                content,
-                ancestors,
-                fb_size,
-                white,
-                texture_size,
-                hits,
-                sprites,
-            ),
-            Direction::Column => arrange_flex_column(
-                nodes,
-                index,
-                content,
-                ancestors,
-                fb_size,
-                white,
-                texture_size,
-                hits,
-                sprites,
-            ),
-        },
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn arrange_flex_row(
-    nodes: &[Node],
-    index: usize,
-    content: Rect,
-    ancestors: &[UiId],
-    fb_size: [f32; 2],
-    white: TextureId,
-    texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
-    hits: &mut Vec<HitEntry>,
-    sprites: &mut Vec<Sprite>,
-) {
-    let node = &nodes[index];
-    let style = &node.style;
-    let n = node.children.len();
-    let mut sizes: Vec<(f32, f32)> = Vec::with_capacity(n);
-    let mut margins: Vec<[f32; 4]> = Vec::with_capacity(n);
-    let mut fill_count = 0usize;
-    let mut fixed_main = 0.0f32;
-
-    for &child in &node.children {
-        let cs = &nodes[child].style;
-        let measured = measure_node(nodes, child, Some(content.width), texture_size);
-        let is_fill = matches!(cs.width, Size::Fill);
-        let w = if is_fill {
-            fill_count += 1;
-            measured.width
-        } else {
-            resolve_axis(cs.width, Some(content.width), measured.width, false)
-        };
-        let stretch = matches!(style.align, Align::Stretch)
-            && matches!(cs.height, Size::Auto | Size::Fill);
-        let avail_h = (content.height - cs.margin[0] - cs.margin[2]).max(0.0);
-        let h = if stretch {
-            avail_h
-        } else {
-            resolve_axis(cs.height, Some(avail_h), measured.height, false)
-        };
-        let margin_main = cs.margin[1] + cs.margin[3];
-        if !is_fill {
-            fixed_main += w + margin_main;
-        } else {
-            fixed_main += margin_main;
-        }
-        sizes.push((w, h));
-        margins.push(cs.margin);
-    }
-
-    let gaps = if n > 1 { style.gap * (n - 1) as f32 } else { 0.0 };
-    let free = (content.width - fixed_main - gaps).max(0.0);
-    let fill_each = if fill_count > 0 {
-        free / fill_count as f32
-    } else {
-        0.0
-    };
-
-    for (i, &child) in node.children.iter().enumerate() {
-        if matches!(nodes[child].style.width, Size::Fill) {
-            sizes[i].0 = fill_each.max(0.0);
-        }
-    }
-
-    let used_main: f32 = sizes
-        .iter()
-        .zip(margins.iter())
-        .map(|((w, _), m)| w + m[1] + m[3])
-        .sum::<f32>()
-        + gaps;
-
-    let (mut x, justify_gap) = match style.justify {
-        Justify::Start => (content.left, 0.0),
-        Justify::Center => (content.left + (content.width - used_main) * 0.5, 0.0),
-        Justify::End => (content.left + content.width - used_main, 0.0),
-        Justify::SpaceBetween => {
-            if n > 1 {
-                let extra = (content.width - (used_main - gaps)).max(0.0);
-                (content.left, extra / (n - 1) as f32)
-            } else {
-                (content.left, 0.0)
-            }
-        }
-    };
-
-    for (i, &child) in node.children.iter().enumerate() {
-        let (w, h) = sizes[i];
-        let m = margins[i];
-        let cross = content.height - m[0] - m[2];
-        let top = match style.align {
-            Align::Start | Align::Stretch => content.top + m[0],
-            Align::Center => content.top + m[0] + (cross - h) * 0.5,
-            Align::End => content.top + m[0] + (cross - h).max(0.0),
-        };
-        let border = Rect {
-            left: x + m[3],
-            top,
-            width: w,
-            height: h,
-        };
-        arrange_node(
-            nodes,
-            child,
-            border,
-            ancestors,
-            fb_size,
-            white,
-            texture_size,
-            hits,
-            sprites,
-        );
-        x = border.right() + m[1];
-        if i + 1 < n {
-            x += if matches!(style.justify, Justify::SpaceBetween) {
-                justify_gap
-            } else {
-                style.gap
-            };
-        }
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn arrange_flex_column(
-    nodes: &[Node],
-    index: usize,
-    content: Rect,
-    ancestors: &[UiId],
-    fb_size: [f32; 2],
-    white: TextureId,
-    texture_size: &mut impl FnMut(TextureId) -> (u32, u32),
-    hits: &mut Vec<HitEntry>,
-    sprites: &mut Vec<Sprite>,
-) {
-    let node = &nodes[index];
-    let style = &node.style;
-    let n = node.children.len();
-    let mut sizes: Vec<(f32, f32)> = Vec::with_capacity(n);
-    let mut margins: Vec<[f32; 4]> = Vec::with_capacity(n);
-    let mut fill_count = 0usize;
-    let mut fixed_main = 0.0f32;
-
-    for &child in &node.children {
-        let cs = &nodes[child].style;
-        let measured = measure_node(nodes, child, Some(content.width), texture_size);
-        let is_fill = matches!(cs.height, Size::Fill);
-        let h = if is_fill {
-            fill_count += 1;
-            measured.height
-        } else {
-            resolve_axis(cs.height, Some(content.height), measured.height, false)
-        };
-        let stretch = matches!(style.align, Align::Stretch)
-            && matches!(cs.width, Size::Auto | Size::Fill);
-        let avail_w = (content.width - cs.margin[1] - cs.margin[3]).max(0.0);
-        let w = if stretch {
-            avail_w
-        } else {
-            resolve_axis(cs.width, Some(avail_w), measured.width, false)
-        };
-        let margin_main = cs.margin[0] + cs.margin[2];
-        if !is_fill {
-            fixed_main += h + margin_main;
-        } else {
-            fixed_main += margin_main;
-        }
-        sizes.push((w, h));
-        margins.push(cs.margin);
-    }
-
-    let gaps = if n > 1 { style.gap * (n - 1) as f32 } else { 0.0 };
-    let free = (content.height - fixed_main - gaps).max(0.0);
-    let fill_each = if fill_count > 0 {
-        free / fill_count as f32
-    } else {
-        0.0
-    };
-
-    for (i, &child) in node.children.iter().enumerate() {
-        if matches!(nodes[child].style.height, Size::Fill) {
-            sizes[i].1 = fill_each.max(0.0);
-        }
-    }
-
-    let used_main: f32 = sizes
-        .iter()
-        .zip(margins.iter())
-        .map(|((_, h), m)| h + m[0] + m[2])
-        .sum::<f32>()
-        + gaps;
-
-    let (mut y, justify_gap) = match style.justify {
-        Justify::Start => (content.top, 0.0),
-        Justify::Center => (content.top + (content.height - used_main) * 0.5, 0.0),
-        Justify::End => (content.top + content.height - used_main, 0.0),
-        Justify::SpaceBetween => {
-            if n > 1 {
-                let extra = (content.height - (used_main - gaps)).max(0.0);
-                (content.top, extra / (n - 1) as f32)
-            } else {
-                (content.top, 0.0)
-            }
-        }
-    };
-
-    for (i, &child) in node.children.iter().enumerate() {
-        let (w, h) = sizes[i];
-        let m = margins[i];
-        let cross = content.width - m[1] - m[3];
-        let left = match style.align {
-            Align::Start | Align::Stretch => content.left + m[3],
-            Align::Center => content.left + m[3] + (cross - w) * 0.5,
-            Align::End => content.left + m[3] + (cross - w).max(0.0),
-        };
-        let border = Rect {
-            left,
-            top: y + m[0],
-            width: w,
-            height: h,
-        };
-        arrange_node(
-            nodes,
-            child,
-            border,
-            ancestors,
-            fb_size,
-            white,
-            texture_size,
-            hits,
-            sprites,
-        );
-        y = border.bottom() + m[2];
-        if i + 1 < n {
-            y += if matches!(style.justify, Justify::SpaceBetween) {
-                justify_gap
-            } else {
-                style.gap
-            };
         }
     }
 }
@@ -964,6 +534,7 @@ fn push_rect_sprite(
     rect: Rect,
     fb_size: [f32; 2],
     color: [f32; 4],
+    uv: [f32; 4],
 ) {
     if rect.width <= 0.0 || rect.height <= 0.0 {
         return;
@@ -974,6 +545,7 @@ fn push_rect_sprite(
         [rect.width, rect.height],
     );
     s.color = color;
+    s.uv = uv;
     sprites.push(s);
 }
 
@@ -1009,6 +581,7 @@ fn push_text_sprites(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::style;
 
     fn empty_size(_: TextureId) -> (u32, u32) {
         (0, 0)
@@ -1023,33 +596,15 @@ mod tests {
     }
 
     #[test]
-    fn block_stacks_children() {
+    fn column_stacks_children() {
         let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(1),
-            Style {
-                width: Size::Px(100.0),
-                height: Size::Auto,
-                ..Style::default()
-            },
+            style!(width: 100 pt, flex_direction: column),
             |ui| {
-                ui.node(
-                    UiId(2),
-                    Style {
-                        height: Size::Px(20.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
-                ui.node(
-                    UiId(3),
-                    Style {
-                        height: Size::Px(30.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
+                ui.node(UiId(2), style!(height: 20 pt, width: 100 pt), |_| {});
+                ui.node(UiId(3), style!(height: 30 pt, width: 100 pt), |_| {});
             },
         );
         let hits = layout_hits(&mut ui, [200.0, 200.0]);
@@ -1061,44 +616,26 @@ mod tests {
     }
 
     #[test]
-    fn flex_row_fill_shares_space() {
+    fn flex_one_shares_row() {
         let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(1),
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(100.0),
-                height: Size::Px(40.0),
-                ..Style::default()
-            },
+            style!(
+                flex_direction: row,
+                width: 100 pt,
+                height: 40 pt,
+            ),
             |ui| {
-                ui.node(
-                    UiId(2),
-                    Style {
-                        width: Size::Fill,
-                        height: Size::Px(40.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
-                ui.node(
-                    UiId(3),
-                    Style {
-                        width: Size::Fill,
-                        height: Size::Px(40.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
+                ui.node(UiId(2), style!(flex: 1, height: 40 pt), |_| {});
+                ui.node(UiId(3), style!(flex: 1, height: 40 pt), |_| {});
             },
         );
         let hits = layout_hits(&mut ui, [200.0, 200.0]);
         let a = hits.iter().find(|(id, _)| *id == UiId(2)).unwrap().1;
         let b = hits.iter().find(|(id, _)| *id == UiId(3)).unwrap().1;
-        assert!((a.width - 50.0).abs() < 1e-3);
-        assert!((b.width - 50.0).abs() < 1e-3);
+        assert!((a.width - 50.0).abs() < 1e-3, "a.width={}", a.width);
+        assert!((b.width - 50.0).abs() < 1e-3, "b.width={}", b.width);
         assert!((b.left - 50.0).abs() < 1e-3);
     }
 
@@ -1108,21 +645,9 @@ mod tests {
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(1),
-            Style {
-                width: Size::Px(200.0),
-                height: Size::Px(50.0),
-                ..Style::default()
-            },
+            style!(width: 200 pt, height: 50 pt),
             |ui| {
-                ui.node(
-                    UiId(2),
-                    Style {
-                        width: Size::Pct(0.5),
-                        height: Size::Px(20.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
+                ui.node(UiId(2), style!(width: 50 %, height: 20 pt), |_| {});
             },
         );
         let hits = layout_hits(&mut ui, [400.0, 400.0]);
@@ -1131,17 +656,38 @@ mod tests {
     }
 
     #[test]
+    fn absolute_bottom_bar() {
+        let mut ui = Ui::default();
+        ui.begin_frame([0.0, 0.0], false, false);
+        ui.node(
+            UiId(1),
+            style!(width: 200 pt, height: 300 pt),
+            |ui| {
+                ui.node(
+                    UiId(2),
+                    style!(
+                        position: absolute,
+                        width: 100 %,
+                        bottom: 0 pt,
+                        height: 40 pt,
+                    ),
+                    |_| {},
+                );
+            },
+        );
+        let hits = layout_hits(&mut ui, [400.0, 400.0]);
+        let bar = hits.iter().find(|(id, _)| *id == UiId(2)).unwrap().1;
+        assert!((bar.height - 40.0).abs() < 1e-3);
+        assert!((bar.top - 260.0).abs() < 1e-3, "bar.top={}", bar.top);
+        assert!((bar.width - 200.0).abs() < 1e-3);
+    }
+
+    #[test]
     fn text_width_is_glyph_count() {
         let font = Font::grid(TextureId::from_raw(1), 10, 1, '0');
         let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
-        ui.text(
-            UiId(1),
-            &font,
-            [10.0, 16.0],
-            Style::default(),
-            "123",
-        );
+        ui.text(UiId(1), &font, [10.0, 16.0], Style::default(), "123");
         let hits = layout_hits(&mut ui, [200.0, 200.0]);
         let r = hits.iter().find(|(id, _)| *id == UiId(1)).unwrap().1;
         assert!((r.width - 30.0).abs() < 1e-3);
@@ -1155,12 +701,7 @@ mod tests {
         ui.image(
             UiId(1),
             TextureId::from_raw(5),
-            Style {
-                width: Size::Px(100.0),
-                height: Size::Px(50.0),
-                fit: Fit::Contain,
-                ..Style::default()
-            },
+            style!(width: 100 pt, height: 50 pt, fit: Fit::Contain),
         );
         ui.layout([200.0, 200.0], TextureId::from_raw(0), |id| {
             if id == TextureId::from_raw(5) {
@@ -1176,26 +717,43 @@ mod tests {
     }
 
     #[test]
+    fn image_uv_uses_cell_size_for_contain() {
+        let mut ui = Ui::default();
+        ui.begin_frame([0.0, 0.0], false, false);
+        // Atlas 100x50, UV covers left half → cell 50x50.
+        ui.image(
+            UiId(1),
+            TextureId::from_raw(5),
+            style!(
+                width: 100 pt,
+                height: 50 pt,
+                fit: Fit::Contain,
+                uv: [0.0, 0.0, 0.5, 1.0],
+            ),
+        );
+        ui.layout([200.0, 200.0], TextureId::from_raw(0), |id| {
+            if id == TextureId::from_raw(5) {
+                (100, 50)
+            } else {
+                (0, 0)
+            }
+        });
+        assert_eq!(ui.sprites.len(), 1);
+        let s = &ui.sprites[0];
+        assert!((s.size[0] - 50.0).abs() < 1e-3, "w={}", s.size[0]);
+        assert!((s.size[1] - 50.0).abs() < 1e-3, "h={}", s.size[1]);
+        assert_eq!(s.uv, [0.0, 0.0, 0.5, 1.0]);
+    }
+
+    #[test]
     fn hit_test_topmost_and_ancestors() {
         let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(1),
-            Style {
-                width: Size::Px(100.0),
-                height: Size::Px(100.0),
-                ..Style::default()
-            },
+            style!(width: 100 pt, height: 100 pt),
             |ui| {
-                ui.node(
-                    UiId(2),
-                    Style {
-                        width: Size::Px(40.0),
-                        height: Size::Px(40.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
+                ui.node(UiId(2), style!(width: 40 pt, height: 40 pt), |_| {});
             },
         );
         ui.layout([200.0, 200.0], TextureId::from_raw(0), empty_size);
@@ -1207,56 +765,49 @@ mod tests {
     }
 
     #[test]
-    fn later_sibling_wins_hit() {
+    fn padding_not_double_counted() {
         let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(1),
-            Style {
-                width: Size::Px(50.0),
-                height: Size::Px(50.0),
-                ..Style::default()
+            style!(width: 100 pt, height: 100 pt, padding: 10 pt),
+            |ui| {
+                ui.node(UiId(2), style!(width: 20 pt, height: 20 pt), |_| {});
             },
-            |_| {},
         );
-        // Second top-level node starts below the first in block flow under the root.
-        // Overlap by placing both with absolute-ish sizing via nested empty roots:
-        // Simulate overlap by laying out two full-size overlapping panels as siblings
-        // under a flex with zero gap and Fill — use padding-free full rects via
-        // rebuilding with known hit rects manually isn't possible; instead nest
-        // both at top-left by using a flex row with negative-free space isn't allowed.
-        // Place a second panel as child that covers the first via a later sibling in
-        // the same parent with margin that keeps it on top in paint order at same spot.
+        let hits = layout_hits(&mut ui, [200.0, 200.0]);
+        let child = hits.iter().find(|(id, _)| *id == UiId(2)).unwrap().1;
+        assert!(
+            (child.left - 10.0).abs() < 1e-3 && (child.top - 10.0).abs() < 1e-3,
+            "child origin {:?}",
+            (child.left, child.top)
+        );
+    }
+
+    #[test]
+    fn later_sibling_wins_hit() {
+        let mut ui = Ui::default();
         ui.begin_frame([0.0, 0.0], false, false);
         ui.node(
             UiId(10),
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(50.0),
-                height: Size::Px(50.0),
-                ..Style::default()
-            },
+            style!(
+                flex_direction: row,
+                width: 50 pt,
+                height: 50 pt,
+            ),
             |ui| {
-                ui.node(
-                    UiId(11),
-                    Style {
-                        width: Size::Px(50.0),
-                        height: Size::Px(50.0),
-                        ..Style::default()
-                    },
-                    |_| {},
-                );
+                ui.node(UiId(11), style!(width: 50 pt, height: 50 pt), |_| {});
             },
         );
         ui.node(
             UiId(20),
-            Style {
-                width: Size::Px(50.0),
-                height: Size::Px(50.0),
-                margin: [-50.0, 0.0, 0.0, 0.0],
-                ..Style::default()
-            },
+            style!(
+                position: absolute,
+                width: 50 pt,
+                height: 50 pt,
+                top: 0 pt,
+                left: 0 pt,
+            ),
             |_| {},
         );
         ui.layout([200.0, 200.0], TextureId::from_raw(0), empty_size);

@@ -7,10 +7,10 @@
 //!
 //! Controls: W/S or ↑/↓ move your paddle (mouse Y also works while inside the window).
 //!
-//! Protocol (game-owned bytes):
-//! - client → host: `[1, y_le_f32]` paddle
-//! - host → all:    `[2, left_y, right_y, ball_x, ball_y, ball_vx, ball_vy, score_l_u8, score_r_u8]`
-//! - host → client: `[3, peer_u32]` once (your id)
+//! Protocol (game-owned bytes over WebRTC):
+//! - client → host (reliable): `[1, y_le_f32]` paddle
+//! - host → all (unreliable):  `[2, left_y, right_y, ball_x, ball_y, ball_vx, ball_vy, score_l_u8, score_r_u8]`
+//! - host → client (reliable): `[3, peer_u32]` once (your id)
 
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
@@ -231,12 +231,15 @@ impl NetPlay {
                         if let Some(id) = Self::decode_you(&bytes) {
                             self.my_id = Some(id);
                             self.status = "you are right paddle".into();
-                        } else if bytes.first() == Some(&TAG_STATE) {
-                            self.decode_state(&bytes);
                         }
                     }
                     NetRole::Offline => {}
                 },
+                NetEvent::Datagram { bytes, .. } => {
+                    if ctx.net.role() == NetRole::Client && bytes.first() == Some(&TAG_STATE) {
+                        self.decode_state(&bytes);
+                    }
+                }
                 NetEvent::Disconnected => {
                     self.online = false;
                     self.playing = false;
@@ -335,7 +338,7 @@ impl NetPlay {
     fn relay(&mut self, ctx: &mut Context) {
         match ctx.net.role() {
             NetRole::Hosting => {
-                let _ = ctx.net.broadcast(&self.encode_state());
+                let _ = ctx.net.broadcast_unreliable(&self.encode_state());
             }
             NetRole::Client => {
                 let _ = ctx.net.send(PeerId::HOST, &Self::encode_paddle(self.local_y));

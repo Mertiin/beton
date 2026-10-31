@@ -48,6 +48,28 @@ Output (`VsOut`):
 |-------|---------|
 | `clip` | Position in clip space (`@builtin(position)`) — required |
 | `uv`, `color` | Passed through to the fragment stage |
+| `local_uv` | Quad corner UV in 0..1 (for discs / rings in custom fragments) |
+
+## Game-authored shaders
+
+Games register extra pipelines with [`Gfx::create_shader`](texture.md):
+
+```rust
+let id = ctx.gfx.create_shader(ShaderDesc {
+    wgsl: &source,
+    blend: Blend::Add,
+    vertex: VertexShader::Engine,
+    uniform_bytes: 16,
+})?;
+sprite.shader = id;
+ctx.gfx.write_uniform(id, bytemuck::bytes_of(&time))?;
+```
+
+- Group 0 stays the camera; group 1 stays the sprite texture.
+- Group 2 is an optional uniform buffer shared by every sprite using that shader.
+- `VertexShader::Engine` pairs the engine `vs` with your `@fragment fn fs`.
+- `VertexShader::Custom` uses your `@vertex fn vs` too; it must read the same attributes (locations 0–6).
+- `ShaderId::SPRITE` is the built-in textured alpha pipeline (slot 0).
 
 Placement:
 

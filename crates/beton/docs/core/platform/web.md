@@ -57,7 +57,7 @@ Ok(())
 
 ## Networking (`web_net.rs`)
 
-`NetDriver::host` always returns an error — a tab cannot listen. `connect` opens `web_sys::WebSocket` with `BinaryType::Arraybuffer` (`ws://` or `wss://`). Callbacks push into a queue the frame drains.
+`NetDriver::host` always returns an error — a tab cannot listen. `connect` opens a signaling `WebSocket` plus an `RTCPeerConnection` (no STUN servers; LAN / localhost only). The host creates data channels `"rel"` and `"dg"`; this side answers and routes them by label. `Connected` fires when both channels are open. Game sends use the data channels; the WebSocket carries binary-tagged SDP / ICE only.
 
 Mixed content: from an `https://` page, `ws://` only works to localhost; use `wss://` for a remote host (TLS must terminate in front of the plain desktop listener). Prefer `trunk serve` (http) for LAN `ws://` testing.
 

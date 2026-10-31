@@ -19,10 +19,12 @@ pub use core::net::{Net, NetEvent, NetRole, PeerId, MAX_PAYLOAD, MAX_PEERS};
 pub use core::object::{
     integrate_velocities, GameObject, GameObjectId, Query, Velocity, World,
 };
+pub use core::particles::{step_particles, Particle, Particles, MAX_PARTICLES};
 #[cfg(feature = "physics")]
 pub use core::object::{step_rigid_bodies, RigidBody};
-pub use core::render::{Gfx, TextureHandle, TextureId};
-pub use core::scene::{Font, Scene, Sprite};
-pub use core::ui::{
-    Align, Direction, Display, Fit, Justify, Size, Style, Ui, UiId,
+pub use core::render::{
+    Blend, Gfx, ShaderDesc, ShaderId, TextureHandle, TextureId, VertexShader,
 };
+pub use core::scene::{Font, Scene, Sprite};
+pub use core::ui::{Fit, Length, Style, Ui, UiId};
+pub use yoga::{Align, FlexDirection, Justify, PositionType};

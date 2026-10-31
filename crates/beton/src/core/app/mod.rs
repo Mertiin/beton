@@ -16,6 +16,7 @@ use crate::core::input::Input;
 use crate::core::math::Vec3;
 use crate::core::net::Net;
 use crate::core::object::World;
+use crate::core::particles::Particles;
 use crate::core::platform::{self, Duration, Instant};
 use crate::core::render::{FrameError, Gfx, Renderer};
 use crate::core::scene::Scene;
@@ -64,6 +65,8 @@ pub struct Context<'a> {
     pub audio: &'a mut Audio,
     /// Retained objects.
     pub world: &'a mut World,
+    /// Short-lived particles. Call [`crate::step_particles`] from `update`; the engine draws them.
+    pub particles: &'a mut Particles,
     /// Immediate sprites for this frame.
     pub scene: &'a mut Scene,
     /// Screen-fixed UI for this frame.
@@ -95,6 +98,13 @@ pub trait Game {
     fn assets(&self) -> &[&'static str] {
         &[]
     }
+    /// Directories to preload before [`boot`](Game::boot).
+    ///
+    /// Desktop walks each folder. On the web each folder must contain `_index.txt`
+    /// (one relative path per line), written by the game's `build.rs`.
+    fn asset_dirs(&self) -> &[&'static str] {
+        &[]
+    }
     /// Called once after the GPU and [`assets`](Game::assets) are ready. Load textures and
     /// spawn the first objects here.
     fn boot(&mut self, ctx: &mut Context);
@@ -110,10 +120,20 @@ enum EngineEvent {
     },
 }
 
-async fn preload_assets(paths: &[String]) -> Result<HashMap<PathBuf, Vec<u8>>, String> {
-    let mut files = HashMap::with_capacity(paths.len());
-    for path in paths {
-        let bytes = platform::read_bytes(path).await?;
+async fn preload_assets(
+    paths: &[String],
+    dirs: &[String],
+) -> Result<HashMap<PathBuf, Vec<u8>>, String> {
+    let mut all_paths = paths.to_vec();
+    for dir in dirs {
+        let listed = platform::list_asset_dir(dir).await?;
+        all_paths.extend(listed);
+    }
+    all_paths.sort();
+    all_paths.dedup();
+    let mut files = HashMap::with_capacity(all_paths.len());
+    for path in all_paths {
+        let bytes = platform::read_bytes(&path).await?;
         files.insert(PathBuf::from(path), bytes);
     }
     Ok(files)
@@ -142,6 +162,7 @@ pub fn run(config: Config, game: impl Game + 'static) -> Result<(), String> {
         input: Input::default(),
         net: Net::new(),
         world: World::new(),
+        particles: Particles::new(),
         scene: Scene::default(),
         ui: Ui::default(),
         camera: Camera::default(),
@@ -175,6 +196,7 @@ struct EngineApp<G: Game> {
     input: Input,
     net: Net,
     world: World,
+    particles: Particles,
     scene: Scene,
     ui: Ui,
     camera: Camera,
@@ -311,6 +333,7 @@ impl<G: Game> EngineApp<G> {
             gfx,
             audio: &mut self.audio,
             world: &mut self.world,
+            particles: &mut self.particles,
             scene: &mut self.scene,
             ui: &mut self.ui,
             camera: &mut self.camera,
@@ -368,6 +391,7 @@ impl<G: Game> EngineApp<G> {
                 gfx,
                 audio: &mut self.audio,
                 world: &mut self.world,
+                particles: &mut self.particles,
                 scene: &mut self.scene,
                 ui: &mut self.ui,
                 camera: &mut self.camera,
@@ -401,6 +425,7 @@ impl<G: Game> EngineApp<G> {
             drawn.size = [drawn.size[0] * scale[0], drawn.size[1] * scale[1]];
             self.scene.push(drawn);
         }
+        self.particles.push_to_scene(&mut self.scene);
 
         let sprites = self.scene.take_sorted();
 
@@ -504,10 +529,16 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
             .iter()
             .map(|path| (*path).to_string())
             .collect();
+        let asset_dirs: Vec<String> = self
+            .game
+            .asset_dirs()
+            .iter()
+            .map(|path| (*path).to_string())
+            .collect();
         platform::schedule(async move {
             let result = Renderer::new(window.clone()).await;
             let files = if result.is_ok() {
-                preload_assets(&asset_paths).await
+                preload_assets(&asset_paths, &asset_dirs).await
             } else {
                 Ok(HashMap::new())
             };

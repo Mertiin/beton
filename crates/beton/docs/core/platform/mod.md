@@ -49,7 +49,7 @@ Cargo target tables in `Cargo.toml` are the other allowed place for target-speci
 | `is_audio_gesture` | Whether this press should open audio |
 | `exit_on_escape` | Whether Escape calls `event_loop.exit()` |
 | `read_bytes` | Async file or HTTP load for [`Game::assets`](../app.md) |
-| `NetDriver` | Desktop / web WebSocket host-or-client used by [`net`](../net.md) |
+| `NetDriver` | Desktop / web WebRTC + signaling used by [`net`](../net.md) |
 
 `run_loop`’s contract: on the web it returns `Ok(())` as soon as the loop is scheduled. Later failures go through `warn`, not through the `Result` from `run`.
 

@@ -1,0 +1,4 @@
+01bazooka.txt
+02grenade.txt
+03shotgun.txt
+04cluster.txt

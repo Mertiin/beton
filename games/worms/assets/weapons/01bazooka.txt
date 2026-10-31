@@ -1,0 +1,16 @@
+blast_radius = 16
+damage = 42
+speed = 210
+gravity = 1
+trail = 40
+fragments = 12
+fragment_speed = 80
+fragment_life = 0.45
+effect = ring
+blend = add
+behavior = contact
+ammo = 8
+fuse = 0
+pellets = 1
+spread = 0.2
+children = 0

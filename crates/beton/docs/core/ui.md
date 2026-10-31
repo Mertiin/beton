@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`Ui` is the **screen-fixed immediate-mode UI**: boxes, images, and bitmap text laid out with a small CSS-like box model. It lives in framebuffer pixels (origin top-left, Y down — the same space as `Input::cursor_px`). The game camera does not move it.
+`Ui` is the **screen-fixed immediate-mode UI**: boxes, images, and bitmap text laid out with [Yoga](https://www.yogalayout.dev/) (pure-Rust `yoga-rs`). It lives in framebuffer pixels (origin top-left, Y down — the same space as `Input::cursor_px`). The game camera does not move it.
 
 There is **one document per frame**, not a stack of UI objects. A HUD and a menu are both nodes in that tree. Rebuild it every `update` the same way you fill `Scene`.
 
@@ -11,7 +11,7 @@ There is **one document per frame**, not a stack of UI objects. A HUD and a menu
 ```text
 previous frame's boxes  →  hit-test cursor  →  hovered / clicked
 Game::update builds tree
-layout → sprites in pixel space
+Yoga layout → sprites in pixel space
 world pass, then UI pass on top
 ```
 
@@ -19,46 +19,63 @@ Interaction queries describe the **previous** frame. That one-frame lag is what 
 
 ## Building
 
-Stable [`UiId`](../lib.md) values. Read interaction first, then build:
+Stable [`UiId`](../lib.md) values. Read interaction first, then build with [`style!`](../lib.md):
 
 ```rust
 if ctx.ui.clicked(BUTTON) { self.n += 1; }
 let hot = ctx.ui.hovered(BUTTON);
-ctx.ui.node(PANEL, style, |ui| {
-    ui.image(ICON, tex, image_style);
-    ui.text(LABEL, &font, [18.0, 24.0], text_style, "12");
-    ui.node(BUTTON, button_style, |_| {});
+ctx.ui.node(PANEL, style!(
+    flex_direction: column,
+    width: 280 pt,
+    padding: 20 pt,
+    gap: 12 pt,
+    background: Some([0.16, 0.18, 0.24, 1.0]),
+), |ui| {
+    ui.image(ICON, tex, style!(width: 48 pt, height: 48 pt, fit: Fit::Contain));
+    ui.text(LABEL, &font, [18.0, 24.0], style!(color: [1.0, 1.0, 1.0, 1.0]), "12");
+    ui.node(BUTTON, style!(width: 120 pt, height: 44 pt, background: Some([0.3, 0.5, 0.9, 1.0])), |_| {});
 });
 ```
 
-Top-level calls are children of an implicit root the size of `ctx.fb_size`. `boot` does not keep a tree.
+Top-level calls are children of an implicit root the size of `ctx.fb_size`. Yoga runs with `use_web_defaults: false` (column, stretch cross-axis, flex-shrink 0, border-box). `boot` does not keep a tree.
 
 ### Many panels, submenus
 
 Call `node` more than once at the top level for separate panels. Later siblings draw on top and win the hit-test. Submenus are game state: store an enum, build only the branch you want next frame. Leaving a branch out removes it.
 
-A full-screen dimmer is an ordinary node with a background — not a separate modal API.
+A full-screen dimmer is an absolute node:
+
+```rust
+style!(
+    position: absolute,
+    width: 100 %,
+    height: 100 %,
+    top: 0 pt,
+    left: 0 pt,
+    background: Some([0.0, 0.0, 0.0, 0.55]),
+)
+```
 
 ## Style
 
-One struct, not selectors:
+[`style!`](../lib.md) fills a [`Style`](../lib.md). Unset layout fields keep Yoga defaults. Lengths use `N pt`, `N %` (0–100), `ident pt`, `(expr) pt`, or `auto`.
 
-| Field | Meaning |
-|-------|---------|
-| `display` | `Block` (default) or `Flex` |
-| `direction` | `Row` / `Column` (flex) |
-| `width` / `height` | `Auto`, `Px`, `Pct` (of parent content), `Fill` |
-| `margin` / `padding` | `[top, right, bottom, left]`; `Style::edges(v)` |
-| `gap`, `justify`, `align` | Flex packing (default align `Stretch`) |
+| Key | Meaning |
+|-----|---------|
+| `width` / `height` | Border-box size |
+| `flex` | Yoga flex shorthand |
+| `flex_direction` | `row` / `column` / reverses |
+| `justify_content` / `align_items` | Main / cross packing |
+| `position` | `relative` / `absolute` / `static` |
+| `top` / `right` / `bottom` / `left` | Insets |
+| `padding` / `margin` (+ edge / `inline` / `vertical`) | Box edges |
+| `gap` / `row_gap` / `column_gap` | Child spacing |
 | `background` | Optional RGBA fill (engine white texture) |
 | `color` | Text / image tint |
 | `fit` | Image `Fill`, `Contain`, `Cover` |
+| `uv` | Image UV rect; default `[0, 0, 1, 1]` (full texture). Sprite-sheet frames pass `anim.uv()` |
 
-**Border-box**: width and height include padding. Margins do not collapse. `Pct` on an auto-sized parent is treated as `Auto`.
-
-Block stacks children downward and stretches an `Auto` width to the parent. Flex is one line, no wrap. `Fill` children split positive free space equally and do not shrink.
-
-Text is one line using a `Font` (grid or TTF). For TTF fonts, `glyph_size[1]` is the em height in pixels. Images use `Gfx::texture_size` for `Contain` / `Cover`.
+Text is one line using a `Font` (grid or TTF). For TTF fonts, `glyph_size[1]` is the em height in pixels. Images use `Gfx::texture_size` (times the UV span) for `Contain` / `Cover`.
 
 ## Pointer
 
@@ -72,5 +89,6 @@ UI sprites are drawn in a **second pass** with a pixel orthographic camera after
 
 - [input.md](input.md) — cursor and pointer
 - [scene.md](scene.md) — world-space sprites / fonts
+- [anim.md](anim.md) — sheets + clips for `uv`
 - [render/mod.md](render/mod.md) — second pass
 - [app.md](app.md) — when begin / layout / draw run

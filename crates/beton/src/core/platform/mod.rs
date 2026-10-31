@@ -86,3 +86,10 @@ pub(crate) fn exit_on_escape() -> bool {
 pub(crate) async fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
     backend::read_bytes(path).await
 }
+
+/// List files in an asset directory as relative paths.
+///
+/// Desktop walks the folder. Web fetches `{dir}/_index.txt` written by the game's `build.rs`.
+pub(crate) async fn list_asset_dir(dir: &str) -> Result<Vec<String>, String> {
+    backend::list_asset_dir(dir).await
+}

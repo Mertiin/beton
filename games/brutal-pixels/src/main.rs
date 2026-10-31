@@ -8,8 +8,8 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use beton::{
-    run, Align, Camera, Config, Context, Direction, Display, Fit, Font, Game, Justify, Key,
-    Projection, Size, Sprite, Style, TextureHandle, TextureId, Ui, UiId, Vec3,
+    run, style, Camera, Config, Context, Fit, Font, Game, Key, Projection, Sprite, TextureHandle,
+    TextureId, Ui, UiId, Vec3,
 };
 use rules::{
     ArcKind, PartKind, Phase, Run, Side, MAX_TURNS,
@@ -436,39 +436,32 @@ fn labeled_button(
     // Dark rim + fill reads like a mobile-game CTA.
     ui.node(
         id,
-        Style {
-            display: Display::Flex,
-            direction: Direction::Row,
-            width: Size::Px(w),
-            height: Size::Px(h),
-            padding: Style::edges(3.0),
-            justify: Justify::Center,
-            align: Align::Center,
+        style!(
+            flex_direction: row,
+            width: (w) pt,
+            height: (h) pt,
+            padding: 3 pt,
+            justify_content: center,
+            align_items: center,
             background: Some([0.18, 0.1, 0.05, 1.0]),
-            ..Style::default()
-        },
+        ),
         |ui| {
             ui.node(
                 UiId(id.0 + 40_000),
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Row,
-                    width: Size::Px(w - 6.0),
-                    height: Size::Px(h - 6.0),
-                    justify: Justify::Center,
-                    align: Align::Center,
+                style!(
+                    flex_direction: row,
+                    width: (w - 6.0) pt,
+                    height: (h - 6.0) pt,
+                    justify_content: center,
+                    align_items: center,
                     background: Some(if hot { hot_color } else { color }),
-                    ..Style::default()
-                },
+                ),
                 |ui| {
                     ui.text(
                         UiId(id.0 + 50_000),
                         font,
                         [0.0, 20.0],
-                        Style {
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            ..Style::default()
-                        },
+                        style!(color: [1.0, 1.0, 1.0, 1.0]),
                         label,
                     );
                 },
@@ -480,38 +473,31 @@ fn labeled_button(
 fn hud_chip(ui: &mut Ui, id: UiId, font: &Font, label: &str, fill: [f32; 4], text: [f32; 4]) {
     ui.node(
         id,
-        Style {
-            display: Display::Flex,
-            direction: Direction::Row,
-            height: Size::Px(40.0),
-            padding: [0.0, 14.0, 0.0, 14.0],
-            justify: Justify::Center,
-            align: Align::Center,
+        style!(
+            flex_direction: row,
+            height: 40 pt,
+            padding_inline: 14 pt,
+            justify_content: center,
+            align_items: center,
             background: Some([0.2, 0.12, 0.06, 1.0]),
-            ..Style::default()
-        },
+        ),
         |ui| {
             ui.node(
                 UiId(id.0 + 1),
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Row,
-                    height: Size::Px(34.0),
-                    padding: [0.0, 12.0, 0.0, 12.0],
-                    justify: Justify::Center,
-                    align: Align::Center,
+                style!(
+                    flex_direction: row,
+                    height: 34 pt,
+                    padding_inline: 12 pt,
+                    justify_content: center,
+                    align_items: center,
                     background: Some(fill),
-                    ..Style::default()
-                },
+                ),
                 |ui| {
                     ui.text(
                         UiId(id.0 + 2),
                         font,
                         [0.0, 20.0],
-                        Style {
-                            color: text,
-                            ..Style::default()
-                        },
+                        style!(color: text),
                         label,
                     );
                 },
@@ -613,17 +599,16 @@ impl Game for BrutalPixels {
         let hp_label = format!("HP  {}", self.run.player.max_hp());
         ctx.ui.node(
             ID_HUD,
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(fb[0]),
-                height: Size::Px(UI_TOP_H),
-                padding: [8.0, 16.0, 0.0, 16.0],
-                align: Align::Center,
-                justify: Justify::SpaceBetween,
-                gap: 10.0,
-                ..Style::default()
-            },
+            style!(
+                flex_direction: row,
+                width: (fb[0]) pt,
+                height: (UI_TOP_H) pt,
+                padding_top: 8 pt,
+                padding_inline: 16 pt,
+                align_items: center,
+                justify_content: space_between,
+                gap: 10 pt,
+            ),
             |ui| {
                 hud_chip(
                     ui,
@@ -652,25 +637,23 @@ impl Game for BrutalPixels {
                 // Round pips
                 ui.node(
                     UiId(19),
-                    Style {
-                        display: Display::Flex,
-                        direction: Direction::Row,
-                        height: Size::Px(40.0),
-                        gap: 5.0,
-                        align: Align::Center,
-                        padding: [0.0, 8.0, 0.0, 8.0],
+                    style!(
+                        flex_direction: row,
+                        height: 40 pt,
+                        gap: 5 pt,
+                        align_items: center,
+                        padding_inline: 8 pt,
                         background: Some([0.2, 0.12, 0.06, 0.85]),
-                        ..Style::default()
-                    },
+                    ),
                     |ui| {
                         for r in 1..=MAX_TURNS {
                             let done = r < self.run.turn || self.run.phase == Phase::Won;
                             let cur = r == self.run.turn && self.run.phase != Phase::Won;
                             ui.node(
                                 UiId(20 + r),
-                                Style {
-                                    width: Size::Px(12.0),
-                                    height: Size::Px(12.0),
+                                style!(
+                                    width: 12 pt,
+                                    height: 12 pt,
                                     background: Some(if done {
                                         [0.35, 0.85, 0.4, 1.0]
                                     } else if cur {
@@ -678,8 +661,7 @@ impl Game for BrutalPixels {
                                     } else {
                                         [0.55, 0.42, 0.28, 1.0]
                                     }),
-                                    ..Style::default()
-                                },
+                                ),
                                 |_| {},
                             );
                         }
@@ -692,11 +674,7 @@ impl Game for BrutalPixels {
         let spacer = (fb[1] - used).max(0.0);
         ctx.ui.node(
             UiId(30),
-            Style {
-                width: Size::Px(fb[0]),
-                height: Size::Px(spacer),
-                ..Style::default()
-            },
+            style!(width: (fb[0]) pt, height: (spacer) pt),
             |_| {},
         );
 
@@ -722,25 +700,20 @@ impl Game for BrutalPixels {
         };
         ctx.ui.node(
             ID_HINT,
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(fb[0]),
-                height: Size::Px(UI_HINT_H),
-                justify: Justify::Center,
-                align: Align::Center,
+            style!(
+                flex_direction: row,
+                width: (fb[0]) pt,
+                height: (UI_HINT_H) pt,
+                justify_content: center,
+                align_items: center,
                 background: Some([0.18, 0.12, 0.08, 0.82]),
-                ..Style::default()
-            },
+            ),
             |ui| {
                 ui.text(
                     UiId(15),
                     &ui_font,
                     [0.0, 16.0],
-                    Style {
-                        color: [1.0, 0.93, 0.75, 1.0],
-                        ..Style::default()
-                    },
+                    style!(color: [1.0, 0.93, 0.75, 1.0]),
                     &hint,
                 );
             },
@@ -751,219 +724,192 @@ impl Game for BrutalPixels {
         let _ = wood;
         ctx.ui.node(
             ID_BAR,
-            Style {
-                display: Display::Flex,
-                direction: Direction::Row,
-                width: Size::Px(fb[0]),
-                height: Size::Px(bar_h),
-                padding: Style::edges(8.0),
-                gap: 10.0,
-                align: Align::Center,
-                justify: Justify::Center,
+            style!(
+                flex_direction: row,
+                width: (fb[0]) pt,
+                height: (bar_h) pt,
+                padding: 8 pt,
+                gap: 10 pt,
+                align_items: center,
+                justify_content: center,
                 background: Some([0.28, 0.16, 0.08, 0.96]),
-                ..Style::default()
-            },
+            ),
             |ui| {
-                        ui.text(
-                            UiId(11),
-                            &ui_font,
-                            [0.0, 16.0],
-                            Style {
-                                color: [1.0, 0.9, 0.65, 1.0],
-                                ..Style::default()
-                            },
-                            "TOWER",
-                        );
-                        for (i, m) in self.run.player.modules.iter().enumerate() {
-                            let id = UiId(MODULE_BASE + i as u32);
-                            let selected = self.run.selected_module == Some(i);
-                            let hot = ui.hovered(id);
-                            let card_h = if fighting { 44.0 } else { 84.0 };
-                            let icon_s = if fighting { 26.0 } else { 36.0 };
-                            ui.node(
-                                id,
-                                Style {
-                                    display: Display::Flex,
-                                    direction: Direction::Column,
-                                    width: Size::Px(if fighting { 56.0 } else { 74.0 }),
-                                    height: Size::Px(card_h),
-                                    padding: Style::edges(4.0),
-                                    gap: 2.0,
-                                    align: Align::Center,
-                                    justify: Justify::Center,
-                                    background: Some(if selected {
-                                        [1.0, 0.78, 0.25, 1.0]
-                                    } else if hot {
-                                        [1.0, 0.93, 0.7, 1.0]
-                                    } else {
-                                        [0.96, 0.86, 0.62, 1.0]
-                                    }),
-                                    ..Style::default()
-                                },
-                                |ui| {
+                ui.text(
+                    UiId(11),
+                    &ui_font,
+                    [0.0, 16.0],
+                    style!(color: [1.0, 0.9, 0.65, 1.0]),
+                    "TOWER",
+                );
+                for (i, m) in self.run.player.modules.iter().enumerate() {
+                    let id = UiId(MODULE_BASE + i as u32);
+                    let selected = self.run.selected_module == Some(i);
+                    let hot = ui.hovered(id);
+                    let card_h = if fighting { 44.0 } else { 84.0 };
+                    let icon_s = if fighting { 26.0 } else { 36.0 };
+                    let card_w = if fighting { 56.0 } else { 74.0 };
+                    ui.node(
+                        id,
+                        style!(
+                            flex_direction: column,
+                            width: (card_w) pt,
+                            height: (card_h) pt,
+                            padding: 4 pt,
+                            gap: 2 pt,
+                            align_items: center,
+                            justify_content: center,
+                            background: Some(if selected {
+                                [1.0, 0.78, 0.25, 1.0]
+                            } else if hot {
+                                [1.0, 0.93, 0.7, 1.0]
+                            } else {
+                                [0.96, 0.86, 0.62, 1.0]
+                            }),
+                        ),
+                        |ui| {
+                            ui.image(
+                                UiId(MODULE_BASE + 40 + i as u32),
+                                self.icon(m.kind),
+                                style!(
+                                    width: (icon_s) pt,
+                                    height: (icon_s) pt,
+                                    fit: Fit::Contain,
+                                ),
+                            );
+                            if !fighting {
+                                let label = if m.level >= 2 {
+                                    format!("{} L2", m.kind.short())
+                                } else {
+                                    m.kind.short().to_string()
+                                };
+                                ui.text(
+                                    UiId(MODULE_BASE + 60 + i as u32),
+                                    &font,
+                                    [9.0, 12.0],
+                                    style!(color: [0.25, 0.15, 0.08, 1.0]),
+                                    &label,
+                                );
+                            }
+                        },
+                    );
+                }
+                if self.run.player.modules.is_empty() {
+                    ui.text(
+                        UiId(12),
+                        &ui_font,
+                        [0.0, 16.0],
+                        style!(color: [0.9, 0.82, 0.65, 1.0]),
+                        "Empty",
+                    );
+                }
+
+                if !fighting {
+                    ui.node(
+                        ID_TOWER,
+                        style!(
+                            width: 6 pt,
+                            height: 72 pt,
+                            background: Some([0.35, 0.22, 0.12, 1.0]),
+                        ),
+                        |_| {},
+                    );
+
+                    ui.text(
+                        UiId(33),
+                        &ui_font,
+                        [0.0, 16.0],
+                        style!(color: [1.0, 0.9, 0.65, 1.0]),
+                        "SHOP",
+                    );
+                    for (i, offer) in self.run.bar.iter().enumerate() {
+                        let id = UiId(OFFER_BASE + i as u32);
+                        let hot = ui.hovered(id) && self.run.phase == Phase::Prep;
+                        ui.node(
+                            id,
+                            style!(
+                                flex_direction: column,
+                                width: 84 pt,
+                                height: 88 pt,
+                                padding: 4 pt,
+                                gap: 2 pt,
+                                align_items: center,
+                                justify_content: center,
+                                background: Some(if hot {
+                                    [1.0, 0.88, 0.45, 1.0]
+                                } else {
+                                    [0.92, 0.62, 0.22, 1.0]
+                                }),
+                            ),
+                            |ui| {
+                                if let Some(kind) = offer {
                                     ui.image(
-                                        UiId(MODULE_BASE + 40 + i as u32),
-                                        self.icon(m.kind),
-                                        Style {
-                                            width: Size::Px(icon_s),
-                                            height: Size::Px(icon_s),
+                                        UiId(OFFER_BASE + 40 + i as u32),
+                                        self.icon(*kind),
+                                        style!(
+                                            width: 38 pt,
+                                            height: 38 pt,
                                             fit: Fit::Contain,
-                                            ..Style::default()
-                                        },
+                                        ),
                                     );
-                                    if !fighting {
-                                        let label = if m.level >= 2 {
-                                            format!("{} L2", m.kind.short())
-                                        } else {
-                                            m.kind.short().to_string()
-                                        };
-                                        ui.text(
-                                            UiId(MODULE_BASE + 60 + i as u32),
-                                            &font,
-                                            [9.0, 12.0],
-                                            Style {
-                                                color: [0.25, 0.15, 0.08, 1.0],
-                                                ..Style::default()
-                                            },
-                                            &label,
-                                        );
-                                    }
-                                },
-                            );
-                        }
-                        if self.run.player.modules.is_empty() {
-                            ui.text(
-                                UiId(12),
-                                &ui_font,
-                                [0.0, 16.0],
-                                Style {
-                                    color: [0.9, 0.82, 0.65, 1.0],
-                                    ..Style::default()
-                                },
-                                "Empty",
-                            );
-                        }
+                                    let line = format!("{} ${}", kind.short(), kind.cost());
+                                    ui.text(
+                                        UiId(OFFER_BASE + 60 + i as u32),
+                                        &font,
+                                        [9.0, 12.0],
+                                        style!(color: [0.2, 0.1, 0.04, 1.0]),
+                                        &line,
+                                    );
+                                } else {
+                                    ui.text(
+                                        UiId(OFFER_BASE + 60 + i as u32),
+                                        &ui_font,
+                                        [0.0, 18.0],
+                                        style!(color: [0.45, 0.28, 0.12, 1.0]),
+                                        "—",
+                                    );
+                                }
+                            },
+                        );
+                    }
 
-                        if !fighting {
-                            ui.node(
-                                ID_TOWER,
-                                Style {
-                                    width: Size::Px(6.0),
-                                    height: Size::Px(72.0),
-                                    background: Some([0.35, 0.22, 0.12, 1.0]),
-                                    ..Style::default()
-                                },
-                                |_| {},
-                            );
-
-                            ui.text(
-                                UiId(33),
-                                &ui_font,
-                                [0.0, 16.0],
-                                Style {
-                                    color: [1.0, 0.9, 0.65, 1.0],
-                                    ..Style::default()
-                                },
-                                "SHOP",
-                            );
-                            for (i, offer) in self.run.bar.iter().enumerate() {
-                                let id = UiId(OFFER_BASE + i as u32);
-                                let hot = ui.hovered(id) && self.run.phase == Phase::Prep;
-                                ui.node(
-                                    id,
-                                    Style {
-                                        display: Display::Flex,
-                                        direction: Direction::Column,
-                                        width: Size::Px(84.0),
-                                        height: Size::Px(88.0),
-                                        padding: Style::edges(4.0),
-                                        gap: 2.0,
-                                        align: Align::Center,
-                                        justify: Justify::Center,
-                                        background: Some(if hot {
-                                            [1.0, 0.88, 0.45, 1.0]
-                                        } else {
-                                            [0.92, 0.62, 0.22, 1.0]
-                                        }),
-                                        ..Style::default()
-                                    },
-                                    |ui| {
-                                        if let Some(kind) = offer {
-                                            ui.image(
-                                                UiId(OFFER_BASE + 40 + i as u32),
-                                                self.icon(*kind),
-                                                Style {
-                                                    width: Size::Px(38.0),
-                                                    height: Size::Px(38.0),
-                                                    fit: Fit::Contain,
-                                                    ..Style::default()
-                                                },
-                                            );
-                                            let line =
-                                                format!("{} ${}", kind.short(), kind.cost());
-                                            ui.text(
-                                                UiId(OFFER_BASE + 60 + i as u32),
-                                                &font,
-                                                [9.0, 12.0],
-                                                Style {
-                                                    color: [0.2, 0.1, 0.04, 1.0],
-                                                    ..Style::default()
-                                                },
-                                                &line,
-                                            );
-                                        } else {
-                                            ui.text(
-                                                UiId(OFFER_BASE + 60 + i as u32),
-                                                &ui_font,
-                                                [0.0, 18.0],
-                                                Style {
-                                                    color: [0.45, 0.28, 0.12, 1.0],
-                                                    ..Style::default()
-                                                },
-                                                "—",
-                                            );
-                                        }
-                                    },
-                                );
-                            }
-
-                            if self.run.phase == Phase::Prep {
-                                let reroll_cost = self.run.reroll_cost();
-                                let can_reroll = self.run.gold >= reroll_cost;
-                                let reroll_hot = ui.hovered(ID_REROLL) && can_reroll;
-                                let reroll_label = format!("Reroll ${}", reroll_cost);
-                                labeled_button(
-                                    ui,
-                                    ID_REROLL,
-                                    &ui_font,
-                                    &reroll_label,
-                                    126.0,
-                                    52.0,
-                                    reroll_hot,
-                                    if can_reroll {
-                                        [0.3, 0.55, 0.9, 1.0]
-                                    } else {
-                                        [0.4, 0.4, 0.45, 1.0]
-                                    },
-                                    if can_reroll {
-                                        [0.4, 0.68, 1.0, 1.0]
-                                    } else {
-                                        [0.5, 0.5, 0.55, 1.0]
-                                    },
-                                );
-                                labeled_button(
-                                    ui,
-                                    ID_FIGHT,
-                                    &ui_font,
-                                    "FIGHT!",
-                                    120.0,
-                                    52.0,
-                                    fight_hot,
-                                    [0.88, 0.22, 0.18, 1.0],
-                                    [1.0, 0.4, 0.28, 1.0],
-                                );
-                            }
-                        }
+                    if self.run.phase == Phase::Prep {
+                        let reroll_cost = self.run.reroll_cost();
+                        let can_reroll = self.run.gold >= reroll_cost;
+                        let reroll_hot = ui.hovered(ID_REROLL) && can_reroll;
+                        let reroll_label = format!("Reroll ${}", reroll_cost);
+                        labeled_button(
+                            ui,
+                            ID_REROLL,
+                            &ui_font,
+                            &reroll_label,
+                            126.0,
+                            52.0,
+                            reroll_hot,
+                            if can_reroll {
+                                [0.3, 0.55, 0.9, 1.0]
+                            } else {
+                                [0.4, 0.4, 0.45, 1.0]
+                            },
+                            if can_reroll {
+                                [0.4, 0.68, 1.0, 1.0]
+                            } else {
+                                [0.5, 0.5, 0.55, 1.0]
+                            },
+                        );
+                        labeled_button(
+                            ui,
+                            ID_FIGHT,
+                            &ui_font,
+                            "FIGHT!",
+                            120.0,
+                            52.0,
+                            fight_hot,
+                            [0.88, 0.22, 0.18, 1.0],
+                            [1.0, 0.4, 0.28, 1.0],
+                        );
+                    }
+                }
             },
         );
 
@@ -972,31 +918,30 @@ impl Game for BrutalPixels {
             let restart_hot = ctx.ui.hovered(ID_RESTART);
             ctx.ui.node(
                 ID_RESULT,
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Column,
-                    width: Size::Px(fb[0]),
-                    height: Size::Px(fb[1]),
-                    margin: [-fb[1], 0.0, 0.0, 0.0],
-                    justify: Justify::Center,
-                    align: Align::Center,
-                    gap: 18.0,
+                style!(
+                    position: absolute,
+                    width: 100 %,
+                    height: 100 %,
+                    top: 0 pt,
+                    left: 0 pt,
+                    flex_direction: column,
+                    justify_content: center,
+                    align_items: center,
+                    gap: 18 pt,
                     background: Some([0.0, 0.0, 0.0, 0.7]),
-                    ..Style::default()
-                },
+                ),
                 |ui| {
                     ui.text(
                         UiId(70),
                         &ui_font,
                         [0.0, 48.0],
-                        Style {
+                        style!(
                             color: if win {
                                 [0.45, 1.0, 0.55, 1.0]
                             } else {
                                 [1.0, 0.45, 0.35, 1.0]
                             },
-                            ..Style::default()
-                        },
+                        ),
                         if win { "Victory!" } else { "Defeat" },
                     );
                     labeled_button(

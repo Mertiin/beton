@@ -52,13 +52,15 @@ This **does not return** until the window closes or `event_loop.exit()` runs. Th
 
 ## Networking (`native_net.rs`)
 
-`NetDriver` hosts or dials plain `ws://` with `tungstenite` (handshake feature, no TLS, no Tokio).
+`NetDriver` uses `tungstenite` for **signaling** (`ws://`, no TLS, no Tokio) and [`str0m`](https://github.com/algesten/str0m) for **WebRTC data channels** over UDP.
 
-- **Host:** bind `0.0.0.0`, accept thread, one I/O thread per peer (read with a short timeout + drain an `mpsc` write channel). At most 8 remotes.
-- **Client:** one I/O thread for the single socket.
+- **Host:** bind TCP `0.0.0.0`, accept thread, one I/O thread per peer. Each peer owns a UDP socket + `Rtc`. Host is the offerer and creates channels `"rel"` and `"dg"`.
+- **Client:** one I/O thread; answerer. `Connected` / `PeerJoined` fire only when both channels are open.
+- Signaling frames are binary tags (`offer` / `answer` / `candidate`). Game bytes never travel on the WebSocket.
+- Local host candidates include `127.0.0.1` and the primary LAN IPv4. Chrome `*.local` candidates are resolved when possible.
 - Events land in a shared queue; the frame loop swaps it out. `Drop` / `shutdown` closes sockets, wakes accept via `127.0.0.1:port` (not `0.0.0.0`), and joins threads.
 
-First bind on Windows may prompt the firewall.
+First bind on Windows may prompt the firewall for **TCP and UDP**.
 
 ## Related docs
 

@@ -5,9 +5,9 @@
 use std::path::Path;
 
 use beton::{
-    run, Align, Animation, Camera, Config, Context, Direction, Display, Font, Game, GameObject,
-    GameObjectId, Justify, Key, Projection, Rng, Scene, Size, SoundHandle, Sprite, SpriteSheet,
-    Style, TextureHandle, TextureId, UiId, Vec3, World,
+    run, style, Animation, Camera, Config, Context, Font, Game, GameObject, GameObjectId, Key,
+    Projection, Rng, Scene, SoundHandle, Sprite, SpriteSheet, TextureHandle, TextureId, UiId, Vec3,
+    World,
 };
 
 const ASSETS: &[&str] = &[
@@ -518,42 +518,38 @@ fn draw_start_menu(ctx: &mut Context, font: &Font, start_hot: bool) {
     let [fb_w, fb_h] = ctx.fb_size;
     ctx.ui.node(
         UI_START_PANEL,
-        Style {
-            display: Display::Flex,
-            direction: Direction::Column,
-            width: Size::Px(fb_w),
-            height: Size::Px(fb_h),
-            justify: Justify::Center,
-            align: Align::Center,
+        style!(
+            position: absolute,
+            width: (fb_w) pt,
+            height: (fb_h) pt,
+            top: 0 pt,
+            left: 0 pt,
+            flex_direction: column,
+            justify_content: center,
+            align_items: center,
             background: Some([0.05, 0.08, 0.12, 0.35]),
-            ..Style::default()
-        },
+        ),
         |ui| {
             ui.node(
                 UI_START_BTN,
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Row,
-                    width: Size::Px(200.0),
-                    height: Size::Px(64.0),
-                    justify: Justify::Center,
-                    align: Align::Center,
+                style!(
+                    flex_direction: row,
+                    width: 200 pt,
+                    height: 64 pt,
+                    justify_content: center,
+                    align_items: center,
                     background: Some(if start_hot {
                         [0.35, 0.85, 0.45, 1.0]
                     } else {
                         [0.2, 0.65, 0.3, 1.0]
                     }),
-                    ..Style::default()
-                },
+                ),
                 |ui| {
                     ui.text(
                         UI_START_LABEL,
                         font,
                         [0.0, 28.0],
-                        Style {
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            ..Style::default()
-                        },
+                        style!(color: [1.0, 1.0, 1.0, 1.0]),
                         "START",
                     );
                 },
@@ -567,77 +563,65 @@ fn draw_end_menu(ctx: &mut Context, font: &Font, score: u32, restart_hot: bool) 
     let score_text = format!("Score  {score}");
     ctx.ui.node(
         UI_OVER_DIMMER,
-        Style {
-            display: Display::Flex,
-            direction: Direction::Column,
-            width: Size::Px(fb_w),
-            height: Size::Px(fb_h),
-            justify: Justify::Center,
-            align: Align::Center,
+        style!(
+            position: absolute,
+            width: (fb_w) pt,
+            height: (fb_h) pt,
+            top: 0 pt,
+            left: 0 pt,
+            flex_direction: column,
+            justify_content: center,
+            align_items: center,
             background: Some([0.0, 0.0, 0.0, 0.55]),
-            ..Style::default()
-        },
+        ),
         |ui| {
             ui.node(
                 UI_OVER_PANEL,
-                Style {
-                    display: Display::Flex,
-                    direction: Direction::Column,
-                    width: Size::Px(280.0),
-                    height: Size::Px(220.0),
-                    padding: Style::edges(24.0),
-                    gap: 16.0,
-                    justify: Justify::Center,
-                    align: Align::Center,
+                style!(
+                    flex_direction: column,
+                    width: 280 pt,
+                    height: 220 pt,
+                    padding: 24 pt,
+                    gap: 16 pt,
+                    justify_content: center,
+                    align_items: center,
                     background: Some([0.14, 0.16, 0.2, 0.95]),
-                    ..Style::default()
-                },
+                ),
                 |ui| {
                     ui.text(
                         UI_OVER_TITLE,
                         font,
                         [0.0, 32.0],
-                        Style {
-                            color: [1.0, 0.85, 0.4, 1.0],
-                            ..Style::default()
-                        },
+                        style!(color: [1.0, 0.85, 0.4, 1.0]),
                         "GAME OVER",
                     );
                     ui.text(
                         UI_OVER_SCORE,
                         font,
                         [0.0, 26.0],
-                        Style {
-                            color: [1.0, 1.0, 1.0, 1.0],
-                            ..Style::default()
-                        },
+                        style!(color: [1.0, 1.0, 1.0, 1.0]),
                         &score_text,
                     );
                     ui.node(
                         UI_RESTART_BTN,
-                        Style {
-                            display: Display::Flex,
-                            direction: Direction::Row,
-                            width: Size::Px(180.0),
-                            height: Size::Px(52.0),
-                            justify: Justify::Center,
-                            align: Align::Center,
+                        style!(
+                            flex_direction: row,
+                            width: 180 pt,
+                            height: 52 pt,
+                            justify_content: center,
+                            align_items: center,
                             background: Some(if restart_hot {
                                 [0.95, 0.55, 0.3, 1.0]
                             } else {
                                 [0.8, 0.4, 0.2, 1.0]
                             }),
-                            ..Style::default()
-                        },
+                        ),
                         |ui| {
                             ui.text(
                                 UI_RESTART_LABEL,
                                 font,
                                 [0.0, 24.0],
-                                Style {
-                                    color: [1.0, 1.0, 1.0, 1.0],
-                                    ..Style::default()
-                                },
+                                style!(color: [1.0, 1.0, 1.0, 1.0]),
                                 "RETRY",
                             );
                         },

@@ -45,7 +45,7 @@ pub(crate) struct GpuTexture {
     pub width: u32,
     pub height: u32,
     pub bind_group: wgpu::BindGroup,
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     _view: wgpu::TextureView,
     _sampler: wgpu::Sampler,
 }
@@ -68,12 +68,19 @@ struct TextureSlot {
     cached_size: Option<(u32, u32)>,
 }
 
-/// Loads and creates textures. Opaque to game code beyond its methods.
+/// Loads textures and compiles sprite shaders. Opaque to game code beyond its methods.
 pub struct Gfx {
-    device: wgpu::Device,
-    queue: wgpu::Queue,
+    pub(crate) device: wgpu::Device,
+    pub(crate) queue: wgpu::Queue,
     format: wgpu::TextureFormat,
+    /// Color target format for sprite pipelines (swapchain format).
+    pub(crate) surface_format: wgpu::TextureFormat,
     bind_group_layout: wgpu::BindGroupLayout,
+    pub(crate) uniform_bind_group_layout: Option<wgpu::BindGroupLayout>,
+    pub(crate) pipeline_layout: Option<wgpu::PipelineLayout>,
+    pub(crate) pipeline_layout_uniform: Option<wgpu::PipelineLayout>,
+    pub(crate) engine_shader: Option<wgpu::ShaderModule>,
+    pub(crate) shaders: Vec<super::shader::ShaderSlot>,
     slots: Vec<TextureSlot>,
     by_path: HashMap<PathBuf, TextureId>,
     files: Option<FileBytes>,
@@ -86,13 +93,26 @@ impl Gfx {
         device: wgpu::Device,
         queue: wgpu::Queue,
         format: wgpu::TextureFormat,
+        surface_format: wgpu::TextureFormat,
         bind_group_layout: wgpu::BindGroupLayout,
+        camera_bind_group_layout: &wgpu::BindGroupLayout,
+        engine_shader: wgpu::ShaderModule,
+        sprite_pipeline: wgpu::RenderPipeline,
+        pipeline_layout: wgpu::PipelineLayout,
+        pipeline_layout_uniform: wgpu::PipelineLayout,
+        uniform_bind_group_layout: wgpu::BindGroupLayout,
     ) -> Self {
         let mut gfx = Self {
             device,
             queue,
             format,
+            surface_format,
             bind_group_layout,
+            uniform_bind_group_layout: Some(uniform_bind_group_layout),
+            pipeline_layout: Some(pipeline_layout),
+            pipeline_layout_uniform: Some(pipeline_layout_uniform),
+            engine_shader: Some(engine_shader),
+            shaders: Vec::new(),
             slots: Vec::new(),
             by_path: HashMap::new(),
             files: None,
@@ -102,6 +122,8 @@ impl Gfx {
                 _pin: Arc::new(()),
             },
         };
+        let _ = camera_bind_group_layout;
+        gfx.install_sprite_pipeline(sprite_pipeline);
         let white_id = gfx
             .create_texture(1, 1, &[255, 255, 255, 255])
             .expect("white texture");
@@ -126,6 +148,28 @@ impl Gfx {
             return Ok(bytes);
         }
         std::fs::read(&path).map_err(|err| format!("failed to read {}: {err}", path.display()))
+    }
+
+    /// Paths preloaded under `dir` (from [`Game::assets`](crate::Game::assets) /
+    /// [`Game::asset_dirs`](crate::Game::asset_dirs)), sorted. Skips `_index.txt`.
+    pub fn list_dir(&self, dir: &str) -> Vec<PathBuf> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let mut out = Vec::new();
+        let Some(files) = self.files.as_ref() else {
+            return out;
+        };
+        for path in files.keys() {
+            let s = path.to_string_lossy();
+            if !s.starts_with(&prefix) {
+                continue;
+            }
+            if s.ends_with("/_index.txt") || s.ends_with("\\_index.txt") {
+                continue;
+            }
+            out.push(path.clone());
+        }
+        out.sort();
+        out
     }
 
     /// Register a PNG or JPEG path. Checks that the file exists; does not decode yet.
@@ -174,6 +218,56 @@ impl Gfx {
             height,
             bytes: rgba.to_vec(),
         }))
+    }
+
+    /// Replace the pixels of an existing RGBA texture. Size must match the original.
+    ///
+    /// Updates the retained CPU source so a later unload / re-upload keeps the new image.
+    /// If the texture is already on the GPU, writes the new bytes immediately.
+    pub fn update_texture(&mut self, id: TextureId, rgba: &[u8]) -> Result<(), String> {
+        let max_edge = self.device.limits().max_texture_dimension_2d;
+        let Some(slot) = self.slots.get_mut(id.index() as usize) else {
+            return Err("unknown texture id".into());
+        };
+        if slot.generation != id.generation() {
+            return Err("stale texture id".into());
+        }
+        let (width, height) = match &slot.source {
+            TextureSource::Rgba { width, height, .. } => (*width, *height),
+            TextureSource::Path(_) => {
+                return Err("update_texture only works on create_texture sources".into());
+            }
+        };
+        validate_rgba(width, height, rgba, max_edge)?;
+        match &mut slot.source {
+            TextureSource::Rgba { bytes, .. } => {
+                bytes.clear();
+                bytes.extend_from_slice(rgba);
+            }
+            TextureSource::Path(_) => unreachable!(),
+        }
+        if let Some(gpu) = slot.resident.as_ref() {
+            self.queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &gpu.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(width * 4),
+                    rows_per_image: Some(height),
+                },
+                wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        Ok(())
     }
 
     /// Pin a texture so it stays resident until the handle is dropped.
@@ -435,7 +529,7 @@ impl Gfx {
             width,
             height,
             bind_group,
-            _texture: texture,
+            texture,
             _view: view,
             _sampler: sampler,
         })

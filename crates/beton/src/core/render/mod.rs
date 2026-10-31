@@ -1,7 +1,9 @@
 //! Window surface, sprite pipeline, and present.
 
+mod shader;
 mod texture;
 
+pub use shader::{Blend, ShaderDesc, ShaderId, VertexShader};
 pub use texture::{Gfx, TextureHandle, TextureId};
 
 use std::sync::Arc;
@@ -29,7 +31,6 @@ pub(crate) struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
-    pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     ui_camera_buffer: wgpu::Buffer,
@@ -153,6 +154,21 @@ impl Renderer {
                 ],
             });
 
+        let uniform_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("shader-uniform"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("sprite"),
             bind_group_layouts: &[
@@ -161,9 +177,19 @@ impl Renderer {
             ],
             immediate_size: 0,
         });
+        let pipeline_layout_uniform =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("sprite-uniform"),
+                bind_group_layouts: &[
+                    Some(&camera_bind_group_layout),
+                    Some(&texture_bind_group_layout),
+                    Some(&uniform_bind_group_layout),
+                ],
+                immediate_size: 0,
+            });
 
         let float_size = std::mem::size_of::<f32>() as u64;
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let sprite_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("sprite"),
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
@@ -322,7 +348,14 @@ impl Renderer {
             device.clone(),
             queue.clone(),
             image_format,
+            config.format,
             texture_bind_group_layout.clone(),
+            &camera_bind_group_layout,
+            shader,
+            sprite_pipeline,
+            pipeline_layout,
+            pipeline_layout_uniform,
+            uniform_bind_group_layout,
         );
 
         Ok((
@@ -332,7 +365,6 @@ impl Renderer {
                 device,
                 queue,
                 config,
-                pipeline,
                 camera_buffer,
                 camera_bind_group,
                 ui_camera_buffer,
@@ -448,19 +480,12 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-            for (texture, start, count) in world_ranges {
-                let Some(bind_group) = gfx.bind_group(texture) else {
-                    continue;
-                };
-                pass.set_bind_group(1, bind_group, &[]);
-                pass.draw_indexed(0..6, 0, start..(start + count));
-            }
+            draw_batches(&mut pass, gfx, &world_ranges);
         }
 
         if !ui_sprites.is_empty() {
@@ -487,20 +512,18 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.ui_camera_bind_group, &[]);
             pass.set_vertex_buffer(0, self.quad_vertex_buffer.slice(..));
             pass.set_vertex_buffer(1, self.instance_buffer.slice(..));
             pass.set_index_buffer(self.quad_index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 
-            for (texture, start, count) in ui_ranges {
-                let Some(bind_group) = gfx.bind_group(texture) else {
-                    continue;
-                };
-                pass.set_bind_group(1, bind_group, &[]);
-                let offset_start = world_count + start;
-                pass.draw_indexed(0..6, 0, offset_start..(offset_start + count));
-            }
+            let offset_ranges: Vec<_> = ui_ranges
+                .into_iter()
+                .map(|(shader, texture, start, count)| {
+                    (shader, texture, world_count + start, count)
+                })
+                .collect();
+            draw_batches(&mut pass, gfx, &offset_ranges);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -532,21 +555,46 @@ fn create_depth(
     (texture, view)
 }
 
-/// Pack sprites into instance floats and consecutive texture batch ranges.
-fn pack_instances(sprites: &[Sprite]) -> (Vec<f32>, Vec<(TextureId, u32, u32)>) {
+/// Pack sprites into instance floats and consecutive (shader, texture) batch ranges.
+fn pack_instances(sprites: &[Sprite]) -> (Vec<f32>, Vec<(ShaderId, TextureId, u32, u32)>) {
     let mut floats = Vec::with_capacity(sprites.len() * FLOATS_PER_INSTANCE);
     let mut ranges = Vec::new();
     let mut i = 0u32;
     while i < sprites.len() as u32 {
+        let shader = sprites[i as usize].shader;
         let texture = sprites[i as usize].texture;
         let start = i;
-        while i < sprites.len() as u32 && sprites[i as usize].texture == texture {
+        while i < sprites.len() as u32
+            && sprites[i as usize].shader == shader
+            && sprites[i as usize].texture == texture
+        {
             push_instance(&mut floats, &sprites[i as usize]);
             i += 1;
         }
-        ranges.push((texture, start, i - start));
+        ranges.push((shader, texture, start, i - start));
     }
     (floats, ranges)
+}
+
+fn draw_batches(
+    pass: &mut wgpu::RenderPass<'_>,
+    gfx: &Gfx,
+    ranges: &[(ShaderId, TextureId, u32, u32)],
+) {
+    for &(shader, texture, start, count) in ranges {
+        let Some(pipeline) = gfx.shader_pipeline(shader) else {
+            continue;
+        };
+        let Some(bind_group) = gfx.bind_group(texture) else {
+            continue;
+        };
+        pass.set_pipeline(pipeline);
+        pass.set_bind_group(1, bind_group, &[]);
+        if let Some(uniform) = gfx.shader_uniform_bind_group(shader) {
+            pass.set_bind_group(2, uniform, &[]);
+        }
+        pass.draw_indexed(0..6, 0, start..(start + count));
+    }
 }
 
 fn push_instance(out: &mut Vec<f32>, sprite: &Sprite) {

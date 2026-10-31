@@ -35,6 +35,56 @@ pub(super) async fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
     Err(format!("failed to read {path}"))
 }
 
+/// List files under `dir` as relative paths (`dir/name`). Skips nested directories.
+pub(super) async fn list_asset_dir(dir: &str) -> Result<Vec<String>, String> {
+    let root = resolve_dir(dir)?;
+    let mut out = Vec::new();
+    let entries = std::fs::read_dir(&root)
+        .map_err(|err| format!("failed to read dir {}: {err}", root.display()))?;
+    for entry in entries {
+        let entry =
+            entry.map_err(|err| format!("failed to read dir {}: {err}", root.display()))?;
+        if !entry
+            .file_type()
+            .map(|t| t.is_file())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name == "_index.txt" {
+            continue;
+        }
+        out.push(format!("{}/{}", dir.trim_end_matches('/'), name));
+    }
+    out.sort();
+    Ok(out)
+}
+
+fn resolve_dir(dir: &str) -> Result<std::path::PathBuf, String> {
+    let path = Path::new(dir);
+    if path.is_dir() {
+        return Ok(path.to_path_buf());
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            let beside = parent.join(dir);
+            if beside.is_dir() {
+                return Ok(beside);
+            }
+            return Err(format!(
+                "failed to open dir {} (also tried {})",
+                dir,
+                beside.display()
+            ));
+        }
+    }
+    Err(format!("failed to open dir {dir}"))
+}
+
 pub(super) fn window_attributes(title: &str, width: u32, height: u32) -> WindowAttributes {
     WindowAttributes::default()
         .with_title(title)

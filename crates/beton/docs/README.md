@@ -13,8 +13,8 @@ That translation has three layers:
 | Layer | You think in… | Engine types |
 |-------|---------------|--------------|
 | Gameplay | “the bird is here, pipes move left” | `World`, `GameObject`, components, `Input`, `Animation` |
-| Presentation | “draw this image here, this big, this tint” | `Scene`, `Sprite`, `Font`, `Camera` |
-| Screen UI | “layout this panel in pixels, click this button” | `Ui`, `UiId`, `Style` |
+| Presentation | “draw this image here, this big, this tint” | `Scene`, `Sprite`, `Font`, `Camera`, `Particles` |
+| Screen UI | “layout this panel in pixels, click this button” | `Ui`, `UiId`, `style!` |
 | Audio | “play this clip once / looped” | `Audio`, `SoundId`, `SoundHandle`, `VoiceId` |
 | GPU | “upload buffers, run shaders, present” | `Gfx`, `Renderer`, `shader.wgsl` (mostly hidden) |
 
@@ -65,6 +65,7 @@ One markdown file per source file. A module that is only `mod.rs` keeps a single
 | 11 | [core/object/velocity.md](core/object/velocity.md) | `src/core/object/velocity.rs` | Shared linear speed + integrator |
 | 12 | [core/object/rigid.md](core/object/rigid.md) | `src/core/object/rigid.rs` | Rigid body material + Rapier step |
 | 13 | [core/scene.md](core/scene.md) | `src/core/scene/mod.rs` | Sprites, fonts, one-frame draw list |
+| 13b | [core/particles.md](core/particles.md) | `src/core/particles/mod.rs` | Trails, blasts, debris |
 | 14 | [core/ui.md](core/ui.md) | `src/core/ui/mod.rs` | Screen-fixed layout UI |
 | 15 | [core/camera.md](core/camera.md) | `src/core/camera/mod.rs` | How world space maps into the window |
 | 16 | [core/input.md](core/input.md) | `src/core/input/mod.rs` | Keys held / pressed, cursor, pointer |
