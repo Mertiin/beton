@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, TouchPhase, WindowEvent};
+use winit::event::{ElementState, MouseButton, MouseScrollDelta, TouchPhase, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::keyboard::{Key, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -582,12 +582,31 @@ impl<G: Game> ApplicationHandler<EngineEvent> for EngineApp<G> {
                 self.request_redraw_if_idle();
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if matches!(button, MouseButton::Left) {
-                    let pressed = state == ElementState::Pressed;
-                    self.input.pointer_event(pressed);
-                    self.maybe_open_audio(pressed);
-                    self.request_redraw_if_idle();
+                let pressed = state == ElementState::Pressed;
+                match button {
+                    MouseButton::Left => {
+                        self.input.pointer_event(pressed);
+                        self.maybe_open_audio(pressed);
+                        self.request_redraw_if_idle();
+                    }
+                    MouseButton::Right => {
+                        self.input.secondary_event(pressed);
+                        self.request_redraw_if_idle();
+                    }
+                    MouseButton::Middle => {
+                        self.input.middle_event(pressed);
+                        self.request_redraw_if_idle();
+                    }
+                    _ => {}
                 }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                let dy = match delta {
+                    MouseScrollDelta::LineDelta(_, y) => y,
+                    MouseScrollDelta::PixelDelta(pos) => (pos.y as f32) / 40.0,
+                };
+                self.input.scroll(dy);
+                self.request_redraw_if_idle();
             }
             WindowEvent::Touch(touch) => {
                 // Web sends Touch for fingers; MouseInput is mouse/pen only.

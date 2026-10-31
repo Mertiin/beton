@@ -33,8 +33,10 @@ If you prefer **Dockerfile** (like Hotpot) instead of Compose:
 
 - Base directory: `/`
 - Dockerfile: `deploy/worms-lobby/Dockerfile`
-- Port: `8080`
-- Add **port mappings** `7800-7899` TCP **and** UDP in Coolify
+- **Ports exposes:** `8080` only (no ranges — Coolify rejects them here)
+- **Port mappings:** `7800-7899:7800-7899/tcp,7800-7899:7800-7899/udp`
+- Do **not** map `8080:8080` — Traefik owns HTTP; host-binding 8080 fails with `port is already allocated`
+- Do **not** put `-p` in Custom Docker options (unsupported)
 - Same env vars as above
 
 ## GitHub deploy hook (optional, Hotpot-style)

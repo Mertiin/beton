@@ -1,0 +1,10 @@
+blast_radius = 48
+damage = 70
+speed = 184
+gravity = 1.6
+trail = 18
+fragments = 28
+fragment_speed = 70
+fragment_life = 0.7
+effect = ring
+blend = add

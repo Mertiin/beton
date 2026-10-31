@@ -101,59 +101,53 @@ def ellipse(buf, w, cx, cy, rx, ry, color, shade_left=True):
 def worm_cell(phase):
     """phase 0 idle, 1 scrunch, 2 extend, 3 airborne. Faces right.
 
-    Silhouette: upright head, thick neck, humped back, horizontal tail on the floor
-    (classic Worms S-curve), matching the user example proportions.
+    Drawn for a 10×14 on-screen size over a 6×10 hitbox: clear upright S-curve
+    with head, neck, hump, and floor-hugging tail.
     """
     w, h = 16, 24
     buf = blank(w, h)
     air = phase == 3
-    # Image Y grows down; ground is the bottom of the cell (y ~ 21).
+    # Image Y grows down; feet sit on the bottom row so draw offset matches hitbox.
     if phase == 0:
-        # Idle: long tail behind, clear S.
-        head = (11.5, 6.5, 4.2, 4.6)
-        neck = (10.5, 12.0, 3.2, 3.4)
-        hump = (7.0, 16.5, 4.0, 3.4)
-        tail = (3.5, 21.0, 5.0, 2.4)
+        head = (12.0, 5.5, 3.8, 4.2)
+        neck = (11.0, 11.0, 2.8, 3.2)
+        hump = (6.5, 16.0, 3.8, 3.2)
+        tail = (2.8, 21.5, 4.8, 2.0)
     elif phase == 1:
-        # Scrunch: tail pulled under.
-        head = (11.5, 6.0, 4.2, 4.6)
-        neck = (10.8, 11.5, 3.2, 3.2)
-        hump = (8.5, 16.0, 3.6, 3.6)
-        tail = (6.0, 20.5, 3.6, 2.6)
+        head = (12.0, 5.0, 3.8, 4.2)
+        neck = (11.2, 10.5, 2.8, 3.0)
+        hump = (8.0, 15.5, 3.4, 3.4)
+        tail = (5.5, 21.0, 3.4, 2.2)
     elif phase == 2:
-        # Extend: tail stretched back.
-        head = (11.0, 6.5, 4.2, 4.6)
-        neck = (9.8, 12.0, 3.0, 3.4)
-        hump = (5.5, 16.0, 4.2, 3.2)
-        tail = (1.8, 21.0, 5.4, 2.2)
+        head = (11.5, 5.5, 3.8, 4.2)
+        neck = (10.0, 11.0, 2.6, 3.2)
+        hump = (5.0, 15.5, 4.0, 3.0)
+        tail = (1.4, 21.5, 5.2, 1.9)
     else:
-        # Airborne: tail lifted off the floor.
-        head = (11.0, 5.5, 4.0, 5.0)
-        neck = (10.2, 11.0, 3.0, 3.2)
-        hump = (7.5, 14.5, 3.4, 3.0)
-        tail = (5.0, 17.5, 3.4, 2.4)
+        head = (11.5, 4.5, 3.6, 4.6)
+        neck = (10.5, 10.0, 2.6, 3.0)
+        hump = (7.0, 14.0, 3.2, 2.8)
+        tail = (4.5, 17.0, 3.2, 2.2)
 
     for cx, cy, rx, ry in (tail, hump, neck, head):
         ellipse(buf, w, cx, cy, rx, ry, PINK)
 
-    # Solid bridge along the S so it reads as one body, not four blobs.
-    for y in range(8, 22):
-        # Parametric S: x drifts left as y goes down.
-        t = (y - 8) / 14.0
-        cx = 11.5 - t * (8.0 if phase != 1 else 5.0)
+    for y in range(6, 23 if not air else 19):
+        t = (y - 6) / (16.0 if not air else 12.0)
         if phase == 1:
-            cx = 11.0 - t * 4.5
+            cx = 12.0 - t * 5.5
         elif phase == 2:
-            cx = 11.0 - t * 9.0
+            cx = 11.5 - t * 9.5
         elif air:
-            cx = 11.0 - t * 5.5
-        thick = 3.2 if 10 < y < 18 else 2.6
+            cx = 11.5 - t * 6.0
+        else:
+            cx = 12.0 - t * 8.5
+        thick = 2.8 if 9 < y < 17 else 2.2
         for x in range(int(cx - thick), int(cx + thick) + 1):
             if 0 <= x < w and get(buf, w, x, y)[3] == 0:
                 put(buf, w, x, y, PINK_DK if x < cx else PINK)
 
-    # Face: large vertical oval eyes looking right + brows.
-    for ex, ey in ((9, 4), (12, 4)):
+    for ex, ey in ((9, 3), (12, 3)):
         for y in range(ey, ey + 5):
             for x in range(ex, ex + 2):
                 put(buf, w, x, y, EYE)
@@ -161,11 +155,10 @@ def worm_cell(phase):
         put(buf, w, ex + 1, ey + 3, PUPIL)
         put(buf, w, ex, ey - 1, BROW)
         put(buf, w, ex + 1, ey - 1, BROW)
-    # Snout / smile on the right edge of the head.
-    put(buf, w, 14, 8, PINK)
-    put(buf, w, 15, 9, PINK)
-    put(buf, w, 14, 10, BROW)
-    put(buf, w, 15, 10, BROW)
+    put(buf, w, 14, 7, PINK)
+    put(buf, w, 15, 8, PINK)
+    put(buf, w, 14, 9, BROW)
+    put(buf, w, 15, 9, BROW)
 
     outline(buf, w, h)
     return buf
@@ -210,10 +203,18 @@ def badge(kind):
             put(buf, 32, x, y, (90, 58, 36, 255))
             put(buf, 32, x, y + 1, (90, 58, 36, 255))
         circle(buf, 32, 22, 12, 2, ink)
-    else:
+    elif kind == 3:
         circle(buf, 32, 16, 16, 5, (220, 220, 230, 255))
         circle(buf, 32, 10, 12, 3, (200, 200, 210, 255))
         circle(buf, 32, 21, 20, 3, (180, 180, 190, 255))
+    else:
+        # Banana badge
+        yel = (240, 200, 48, 255)
+        for i, (x, y) in enumerate(
+            ((10, 10), (12, 12), (14, 14), (16, 16), (18, 18), (20, 19), (22, 18))
+        ):
+            circle(buf, 32, x, y, 3 if i < 5 else 2, yel)
+        put(buf, 32, 10, 8, (60, 140, 50, 255))
     return buf
 
 
@@ -268,11 +269,19 @@ def weapon_cell(kind):
         put(buf, 16, 15, 8, (255, 255, 200, 255))
         put(buf, 16, 4, 8, (200, 80, 30, 255))
         outline(buf, 16, 16)
-    else:  # cluster
+    elif kind == 5:  # cluster
         circle(buf, 16, 8, 8, 4, (230, 230, 236, 255))
         circle(buf, 16, 5, 6, 2, (200, 200, 210, 255))
         circle(buf, 16, 11, 10, 2, (190, 190, 200, 255))
         circle(buf, 16, 10, 5, 2, (210, 210, 220, 255))
+    else:  # banana
+        yel = (245, 205, 50, 255)
+        dk = (200, 150, 30, 255)
+        for i, (x, y) in enumerate(((4, 5), (6, 7), (8, 9), (10, 11), (12, 12), (13, 11))):
+            circle(buf, 16, x, y, 2.4 if i < 4 else 2.0, yel if i % 2 == 0 else dk)
+        put(buf, 16, 4, 3, (50, 120, 40, 255))
+        put(buf, 16, 5, 3, (50, 120, 40, 255))
+        outline(buf, 16, 16)
     return buf
 
 
@@ -388,12 +397,12 @@ def main():
     w, h, buf = sheet(worms, 16, 24, 4)
     write_png(ROOT / "worm.png", w, h, buf)
 
-    weapons = [weapon_cell(i) for i in range(6)]
-    w, h, buf = sheet(weapons, 16, 16, 6)
+    weapons = [weapon_cell(i) for i in range(7)]
+    w, h, buf = sheet(weapons, 16, 16, 7)
     write_png(ROOT / "weapons.png", w, h, buf)
 
-    icons = [badge(i) for i in range(4)]
-    w, h, buf = sheet(icons, 32, 32, 4)
+    icons = [badge(i) for i in range(5)]
+    w, h, buf = sheet(icons, 32, 32, 5)
     write_png(ROOT / "icons.png", w, h, buf)
 
     # props.png 96x48: tree (0,0), cloud (32,0), grave (32,32), aim (64,0), power (64,32).

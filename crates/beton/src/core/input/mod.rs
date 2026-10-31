@@ -19,6 +19,14 @@ pub struct Input {
     pointer_down: bool,
     /// Left mouse button went down this frame.
     pointer_pressed: bool,
+    /// Left mouse button went up this frame.
+    pointer_released: bool,
+    /// Right mouse button currently held.
+    secondary_down: bool,
+    /// Middle mouse button currently held.
+    middle_down: bool,
+    /// Vertical scroll this frame (positive = wheel up / zoom in).
+    scroll_y: f32,
 }
 
 impl Input {
@@ -26,6 +34,8 @@ impl Input {
         self.pressed.clear();
         self.released.clear();
         self.pointer_pressed = false;
+        self.pointer_released = false;
+        self.scroll_y = 0.0;
     }
 
     pub(crate) fn key_event(&mut self, key: Key, is_pressed: bool) {
@@ -44,9 +54,22 @@ impl Input {
                 self.pointer_pressed = true;
             }
             self.pointer_down = true;
-        } else {
+        } else if self.pointer_down {
             self.pointer_down = false;
+            self.pointer_released = true;
         }
+    }
+
+    pub(crate) fn secondary_event(&mut self, is_pressed: bool) {
+        self.secondary_down = is_pressed;
+    }
+
+    pub(crate) fn middle_event(&mut self, is_pressed: bool) {
+        self.middle_down = is_pressed;
+    }
+
+    pub(crate) fn scroll(&mut self, dy: f32) {
+        self.scroll_y += dy;
     }
 
     pub(crate) fn cursor_moved(&mut self, x: f32, y: f32) {
@@ -81,6 +104,26 @@ impl Input {
     /// True if the left mouse button went down this frame.
     pub fn pointer_pressed(&self) -> bool {
         self.pointer_pressed
+    }
+
+    /// True if the left mouse button went up this frame.
+    pub fn pointer_released(&self) -> bool {
+        self.pointer_released
+    }
+
+    /// True while the right mouse button is held.
+    pub fn secondary_down(&self) -> bool {
+        self.secondary_down
+    }
+
+    /// True while the middle mouse button is held.
+    pub fn middle_down(&self) -> bool {
+        self.middle_down
+    }
+
+    /// Vertical scroll accumulated this frame (positive = wheel up).
+    pub fn scroll_y(&self) -> f32 {
+        self.scroll_y
     }
 
     /// Cursor in physical framebuffer pixels (origin top-left, Y down).

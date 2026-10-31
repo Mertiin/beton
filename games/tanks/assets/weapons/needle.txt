@@ -1,0 +1,10 @@
+blast_radius = 12
+damage = 28
+speed = 416
+gravity = 0.35
+trail = 70
+fragments = 6
+fragment_speed = 140
+fragment_life = 0.3
+effect = glow
+blend = add
