@@ -282,11 +282,10 @@ async fn reap(app: &App) {
     for (id, room) in inner.rooms.iter_mut() {
         let stale = room.last_hb.elapsed() > Duration::from_secs(15)
             && room.created.elapsed() > Duration::from_secs(20);
-        let empty_old = room.players == 0
-            && room.status == "lobby"
-            && room.created.elapsed() > Duration::from_secs(300);
+        // Drop unused rooms quickly so ports recycle (create-spam / abandoned host).
+        let empty = room.players == 0 && room.created.elapsed() > Duration::from_secs(30);
         let exited = room.child.try_wait().ok().flatten().is_some();
-        if stale || empty_old || exited {
+        if stale || empty || exited {
             let _ = room.child.start_kill();
             dead.push(id.clone());
         }

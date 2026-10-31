@@ -52,7 +52,8 @@ fn run() -> Result<(), String> {
     let mut snap_acc = 0.0f32;
     let mut acc = 0.0f32;
     let mut last_hb = Instant::now() - Duration::from_secs(10);
-    let mut empty_since: Option<Instant> = None;
+    // Exit if nobody is seated — covers never-joined and everyone-left.
+    let mut empty_since: Option<Instant> = Some(Instant::now());
     let tick = Duration::from_secs_f32(DT);
 
     loop {
@@ -78,7 +79,7 @@ fn run() -> Result<(), String> {
                     if leader == Some(id) {
                         leader = seats.first().map(|s| s.0);
                     }
-                    if seats.is_empty() && match_state.is_none() {
+                    if seats.is_empty() {
                         empty_since = Some(Instant::now());
                     }
                 }
@@ -210,8 +211,8 @@ fn run() -> Result<(), String> {
         }
 
         if let Some(since) = empty_since {
-            if since.elapsed() > Duration::from_secs(300) {
-                eprintln!("empty lobby timeout — exiting");
+            if since.elapsed() > Duration::from_secs(30) {
+                eprintln!("empty room timeout — exiting");
                 break;
             }
         }
