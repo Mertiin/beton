@@ -10,12 +10,13 @@ pub const AIM_TIME: f32 = 30.0;
 pub const RETREAT_TIME: f32 = 5.0;
 pub const SETTLE_CAP: f32 = 3.0;
 pub const CHARGE_TIME: f32 = 0.85;
-pub const WATER_Y0: f32 = 36.0;
+pub const WATER_Y0: f32 = 72.0;
 pub const SUDDEN_AFTER: u32 = 16;
 pub const WATER_RISE: f32 = 4.0;
-pub const MAX_PROJ: usize = 16;
+pub const MAX_PROJ: usize = 24;
 pub const WORM_COUNT: usize = 8;
 pub const AIM_SPEED: f32 = 1.6;
+pub const BANANA_GEN: u8 = 3;
 
 const NAMES: [&str; WORM_COUNT] = ["Nub", "Peb", "Wig", "Dot", "Zap", "Mox", "Kip", "Bun"];
 
@@ -33,6 +34,7 @@ pub enum Kind {
     Fuse,
     Pellet,
     Cluster,
+    Banana,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +60,8 @@ pub struct Projectile {
     pub damage: f32,
     pub gravity: f32,
     pub weapon: usize,
+    /// Banana split depth remaining (3 → 2 → 1 → 0). Unused for other kinds.
+    pub generation: u8,
 }
 
 #[derive(Clone, Debug)]
@@ -77,11 +81,13 @@ pub struct Blast {
 
 /// One fixed step of input. Edges (`jump`, `charge_released`, `weapon`, `skip`)
 /// are true for a single step. `charge_held` stays true while the key is down.
+/// When `aim_set`, `aim` is an absolute world angle; otherwise `aim` is a nudge delta.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Control {
     pub dir: f32,
     pub jump: bool,
     pub aim: f32,
+    pub aim_set: bool,
     pub charge_held: bool,
     pub charge_released: bool,
     pub weapon: Option<usize>,
@@ -93,6 +99,7 @@ impl Control {
         Self {
             dir: self.dir,
             aim: self.aim,
+            aim_set: self.aim_set,
             charge_held: self.charge_held,
             ..Self::default()
         }
@@ -101,6 +108,7 @@ impl Control {
     pub fn any(self) -> bool {
         self.dir != 0.0
             || self.jump
+            || self.aim_set
             || self.aim != 0.0
             || self.charge_held
             || self.charge_released
@@ -208,8 +216,15 @@ impl Match {
                     self.worms[active].weapon = index;
                 }
             }
-            let aim = self.worms[active].aim + control.aim;
-            self.worms[active].aim = aim.clamp(0.15, std::f32::consts::PI - 0.15);
+            if control.aim_set {
+                self.worms[active].aim = clamp_aim(control.aim);
+            } else if control.aim != 0.0 {
+                self.worms[active].aim = clamp_aim(self.worms[active].aim + control.aim);
+            }
+            let facing = self.worms[active].aim.cos().signum();
+            if facing != 0.0 {
+                self.worms[active].body.facing = facing;
+            }
             let pellets = weapons
                 .get(self.worms[active].weapon)
                 .map(|w| w.behavior == Behavior::Pellets)
@@ -351,23 +366,34 @@ impl Match {
                         damage: weapon.damage,
                         gravity: weapon.gravity,
                         weapon: index,
+                        generation: 0,
                     });
                 }
             }
-            Behavior::Contact | Behavior::Fuse | Behavior::Cluster => {
+            Behavior::Contact | Behavior::Fuse | Behavior::Cluster | Behavior::Banana => {
                 if self.projs.len() >= MAX_PROJ {
                     return;
                 }
                 let kind = match weapon.behavior {
                     Behavior::Fuse => Kind::Fuse,
                     Behavior::Cluster => Kind::Cluster,
-                    _ => Kind::Shell,
+                    Behavior::Banana => Kind::Banana,
+                    Behavior::Contact | Behavior::Pellets => Kind::Shell,
                 };
-                let fuse = if kind == Kind::Shell { 99.0 } else { weapon.fuse.max(0.05) };
+                let fuse = if matches!(kind, Kind::Shell | Kind::Banana) {
+                    99.0
+                } else {
+                    weapon.fuse.max(0.05)
+                };
                 let ttl = if kind == Kind::Cluster {
                     weapon.children.clamp(2, 8) as f32
                 } else {
                     8.0
+                };
+                let generation = if kind == Kind::Banana {
+                    BANANA_GEN
+                } else {
+                    0
                 };
                 self.projs.push(Projectile {
                     pos: muzzle,
@@ -381,6 +407,7 @@ impl Match {
                     damage: weapon.damage,
                     gravity: weapon.gravity,
                     weapon: index,
+                    generation,
                 });
             }
         }
@@ -426,33 +453,133 @@ impl Match {
                 Fly::Keep => i += 1,
             }
         }
+        self.separate_bananas();
+    }
+
+    /// Bananas pass through each other: push overlaps apart instead of stacking.
+    fn separate_bananas(&mut self) {
+        let n = self.projs.len();
+        for a in 0..n {
+            if self.projs[a].kind != Kind::Banana {
+                continue;
+            }
+            for b in (a + 1)..n {
+                if self.projs[b].kind != Kind::Banana {
+                    continue;
+                }
+                let dx = self.projs[b].pos.x - self.projs[a].pos.x;
+                let dy = self.projs[b].pos.y - self.projs[a].pos.y;
+                let d2 = dx * dx + dy * dy;
+                const MIN: f32 = 12.0;
+                if d2 >= MIN * MIN {
+                    continue;
+                }
+                let d = d2.sqrt().max(0.1);
+                let push = (MIN - d) * 0.5;
+                let nx = dx / d;
+                let ny = dy / d;
+                self.projs[a].pos.x -= nx * push;
+                self.projs[a].pos.y -= ny * push;
+                self.projs[b].pos.x += nx * push;
+                self.projs[b].pos.y += ny * push;
+            }
+        }
     }
 
     fn detonate(&mut self, terrain: &mut Terrain, proj: Projectile, pos: Vec3) {
         self.blast_at(terrain, pos, proj.radius, proj.damage, proj.weapon as u8);
-        if proj.kind != Kind::Cluster {
-            return;
+        if proj.kind == Kind::Banana {
+            // Toss living siblings out of the crater so they don't arm into dirt
+            // and chain-detonate as if they "hit" each other.
+            self.shove_bananas_from(pos, proj.radius.max(14.0) * 2.0);
         }
-        let n = proj.ttl.round().clamp(2.0, 8.0) as u32;
-        for k in 0..n {
-            if self.projs.len() >= MAX_PROJ {
-                break;
+        match proj.kind {
+            Kind::Cluster => {
+                let n = proj.ttl.round().clamp(2.0, 8.0) as u32;
+                let tau = std::f32::consts::TAU;
+                for k in 0..n {
+                    if self.projs.len() >= MAX_PROJ {
+                        break;
+                    }
+                    let angle = k as f32 * tau / n as f32;
+                    let speed = 78.0 + (k as f32) * 4.0;
+                    self.projs.push(Projectile {
+                        pos,
+                        vel: Vec3::new(
+                            angle.cos() * speed,
+                            angle.sin() * speed + 28.0,
+                            0.0,
+                        ),
+                        kind: Kind::Fuse,
+                        fuse: 0.55,
+                        ttl: 3.0,
+                        age: 0.0,
+                        owner: proj.owner,
+                        radius: proj.radius * 0.65,
+                        damage: proj.damage * 0.55,
+                        gravity: 1.0,
+                        weapon: proj.weapon,
+                        generation: 0,
+                    });
+                }
             }
-            let angle = -0.4 + k as f32 * (0.8 / (n - 1) as f32);
-            let speed = 70.0 + (k as f32) * 6.0;
-            self.projs.push(Projectile {
-                pos,
-                vel: Vec3::new(angle.cos() * speed, angle.sin().abs() * speed + 40.0, 0.0),
-                kind: Kind::Fuse,
-                fuse: 0.55,
-                ttl: 3.0,
-                age: 0.0,
-                owner: proj.owner,
-                radius: proj.radius * 0.65,
-                damage: proj.damage * 0.55,
-                gravity: 1.0,
-                weapon: proj.weapon,
-            });
+            Kind::Banana if proj.generation > 0 => {
+                // Random upward fork: tilt + spread vary each split.
+                let tilt = self.rng.range(-0.55, 0.55);
+                let spread = self.rng.range(0.5, 1.2);
+                for k in 0..2 {
+                    if self.projs.len() >= MAX_PROJ {
+                        break;
+                    }
+                    let jitter = self.rng.range(-0.2, 0.2);
+                    let angle = std::f32::consts::FRAC_PI_2
+                        + tilt
+                        + if k == 0 { -spread } else { spread }
+                        + jitter;
+                    let speed = self.rng.range(95.0, 135.0);
+                    let dir = Vec3::new(angle.cos(), angle.sin(), 0.0);
+                    let spawn = banana_open_spawn(terrain, pos, dir, k);
+                    self.projs.push(Projectile {
+                        pos: spawn,
+                        vel: dir * speed,
+                        kind: Kind::Banana,
+                        fuse: 99.0,
+                        ttl: 4.0,
+                        age: 0.0,
+                        owner: proj.owner,
+                        radius: (proj.radius * 0.85).max(8.0),
+                        damage: proj.damage * 0.7,
+                        gravity: 1.05,
+                        weapon: proj.weapon,
+                        generation: proj.generation - 1,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Knock other bananas away from a blast so they don't re-arm into the hole.
+    fn shove_bananas_from(&mut self, origin: Vec3, reach: f32) {
+        let reach2 = reach * reach;
+        for p in &mut self.projs {
+            if p.kind != Kind::Banana {
+                continue;
+            }
+            let dx = p.pos.x - origin.x;
+            let dy = p.pos.y - origin.y;
+            let d2 = dx * dx + dy * dy;
+            if d2 > reach2 || d2 < 0.01 {
+                continue;
+            }
+            let d = d2.sqrt();
+            let nx = dx / d;
+            let ny = (dy / d).max(0.25);
+            p.pos.x += nx * 18.0;
+            p.pos.y += ny * 18.0 + 10.0;
+            p.vel.x += nx * 70.0;
+            p.vel.y = p.vel.y.max(0.0) + 90.0;
+            p.age = 0.0;
         }
     }
 
@@ -633,12 +760,53 @@ enum Fly {
     Fuse(Vec3),
 }
 
+/// Find open air along a banana's launch direction (and a side offset).
+fn banana_open_spawn(terrain: &Terrain, origin: Vec3, dir: Vec3, side: u32) -> Vec3 {
+    let side_x = if side == 0 { -10.0 } else { 10.0 };
+    for dist in [22.0, 30.0, 38.0, 14.0, 46.0] {
+        let p = Vec3::new(
+            origin.x + dir.x * dist + side_x,
+            origin.y + dir.y * dist + 12.0,
+            0.0,
+        );
+        let (c, r) = Terrain::world_to_cell(p.x, p.y);
+        if !terrain.solid_at(c, r) {
+            return p;
+        }
+    }
+    Vec3::new(origin.x + side_x, origin.y + 28.0, 0.0)
+}
+
+/// Keep aim nearly full-circle; nudge off exact straight-down so digging under feet works.
+fn clamp_aim(mut a: f32) -> f32 {
+    let pi = std::f32::consts::PI;
+    let tau = std::f32::consts::TAU;
+    while a > pi {
+        a -= tau;
+    }
+    while a < -pi {
+        a += tau;
+    }
+    let down = -std::f32::consts::FRAC_PI_2;
+    if (a - down).abs() < 0.1 {
+        a = if a >= down { down + 0.1 } else { down - 0.1 };
+    }
+    a
+}
+
 fn step_one(proj: &mut Projectile, terrain: &Terrain, wind: f32, water_y: f32, dt: f32) -> Fly {
     proj.vel.x += wind * dt;
     proj.vel.y -= 140.0 * proj.gravity * dt;
     let bounce = matches!(proj.kind, Kind::Fuse | Kind::Cluster);
+    // Bananas are contact-only — short child fuses used to airburst the splits.
+    let fused = matches!(proj.kind, Kind::Fuse | Kind::Cluster);
     // Skip dirt for a short birth window so the muzzle can leave the worm/hill.
-    let armed = proj.age >= 0.06;
+    // Bananas need longer grace so split children clear the parent crater.
+    let armed = if proj.kind == Kind::Banana {
+        proj.age >= 0.28
+    } else {
+        proj.age >= 0.06
+    };
     let steps = ((proj.vel.length() * dt).max(1.0) as i32).clamp(1, 12);
     let sub = dt / steps as f32;
     for _ in 0..steps {
@@ -652,13 +820,21 @@ fn step_one(proj: &mut Projectile, terrain: &Terrain, wind: f32, water_y: f32, d
         {
             return Fly::Gone;
         }
-        if bounce {
+        if fused {
             proj.fuse -= sub;
             if proj.fuse <= 0.0 {
                 return Fly::Fuse(proj.pos);
             }
         }
         if !armed {
+            // Climb out of solid during grace so split kids leave the crater.
+            if proj.kind == Kind::Banana {
+                let (c, r) = Terrain::world_to_cell(proj.pos.x, proj.pos.y);
+                if terrain.solid_at(c, r) {
+                    proj.pos.y += 3.0;
+                    proj.vel.y = proj.vel.y.max(40.0);
+                }
+            }
             continue;
         }
         let (c, r) = Terrain::world_to_cell(proj.pos.x, proj.pos.y);
@@ -668,6 +844,7 @@ fn step_one(proj: &mut Projectile, terrain: &Terrain, wind: f32, water_y: f32, d
         if proj.kind == Kind::Pellet {
             return Fly::Gone;
         }
+        // Banana (and shells) pop on dirt; grenade/cluster roll instead.
         if !bounce {
             return Fly::Hit(proj.pos);
         }
@@ -728,6 +905,7 @@ pub fn impact_x(terrain: &Terrain, wind: f32) -> f32 {
         damage: 10.0,
         gravity: 1.0,
         weapon: 0,
+        generation: 0,
     };
     for _ in 0..600 {
         match step_one(&mut proj, terrain, wind, 0.0, DT) {
@@ -777,11 +955,27 @@ mod tests {
         w
     }
 
-    #[test]
-    fn stamp_under_a_worm_drops_it() {
+    /// Flat-floor sandbox with water lowered so worms aren't drowned by WATER_Y0.
+    fn dry_floor(seed: u64) -> (Terrain, Match) {
         let mut terrain = Terrain::empty();
         terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 3);
+        let mut m = Match::new(&terrain, seed);
+        m.water_y = 0.0;
+        for w in &mut m.worms {
+            if let Some(y) = terrain.surface_y(w.body.pos.x as i32) {
+                w.body.pos.y = y + WORM_H * 0.5;
+            }
+            w.body.drowning = false;
+            w.body.alive = true;
+            w.body.hp = 100.0;
+            w.body.grounded = true;
+        }
+        (terrain, m)
+    }
+
+    #[test]
+    fn stamp_under_a_worm_drops_it() {
+        let (mut terrain, mut m) = dry_floor(3);
         m.worms[0].body.pos.x = 60.0;
         m.worms[0].body.pos.y = 45.0;
         m.worms[0].body.grounded = true;
@@ -799,9 +993,7 @@ mod tests {
 
     #[test]
     fn team_wipe_sets_over() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 1);
+        let (mut terrain, mut m) = dry_floor(1);
         for w in &mut m.worms {
             if w.team == 1 {
                 w.body.hp = 0.0;
@@ -815,9 +1007,7 @@ mod tests {
 
     #[test]
     fn both_teams_dead_is_a_draw() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 1);
+        let (mut terrain, mut m) = dry_floor(1);
         for w in &mut m.worms {
             w.body.hp = 0.0;
             w.body.alive = false;
@@ -829,14 +1019,13 @@ mod tests {
 
     #[test]
     fn fuse_pops_in_the_air_and_digs() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        // A blob in the air, beside the fuse point, so the blast has dirt to clear.
+        let (mut terrain, mut m) = dry_floor(2);
+        // Dirt near the fuse point (world y ~ 150).
+        let row = (MAP_H as i32 - 1) - 150;
         for col in 128..145 {
-            terrain.set_solid(col, 119, true);
+            terrain.set_solid(col, row, true);
         }
         let before = terrain.count_solid();
-        let mut m = Match::new(&terrain, 2);
         m.worms[0].body.pos = Vec3::new(40.0, 50.0, 0.0);
         m.projs.push(Projectile {
             pos: Vec3::new(120.0, 150.0, 0.0),
@@ -850,6 +1039,7 @@ mod tests {
             damage: 10.0,
             gravity: 0.0,
             weapon: 1,
+            generation: 0,
         });
         m.phase = Phase::Retreat;
         m.timer = 2.0;
@@ -872,9 +1062,7 @@ mod tests {
 
     #[test]
     fn empty_ammo_does_not_fire() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 4);
+        let (mut terrain, mut m) = dry_floor(4);
         let weapons = [bazooka()];
         m.grant_loadout(&weapons);
         m.worms[0].ammo[0] = 1;
@@ -897,9 +1085,7 @@ mod tests {
 
     #[test]
     fn rising_water_drowns_a_worm_that_did_not_move() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 5);
+        let (mut terrain, mut m) = dry_floor(5);
         for w in &mut m.worms {
             w.body.grounded = true;
             w.body.pos.y = 50.0;
@@ -915,9 +1101,7 @@ mod tests {
 
     #[test]
     fn crate_touch_adds_ammo() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 6);
+        let (mut terrain, mut m) = dry_floor(6);
         let weapons = [bazooka()];
         m.grant_loadout(&weapons);
         let before = m.worms[0].ammo[0];
@@ -974,9 +1158,7 @@ mod tests {
 
     #[test]
     fn grenade_rolls_on_dirt_until_fuse() {
-        let mut terrain = Terrain::empty();
-        terrain.fill_below(40.0);
-        let mut m = Match::new(&terrain, 7);
+        let (mut terrain, mut m) = dry_floor(7);
         m.projs.push(Projectile {
             pos: Vec3::new(120.0, 55.0, 0.0),
             vel: Vec3::new(40.0, -80.0, 0.0),
@@ -989,6 +1171,7 @@ mod tests {
             damage: 20.0,
             gravity: 1.0,
             weapon: 1,
+            generation: 0,
         });
         m.phase = Phase::Retreat;
         m.timer = 2.0;
@@ -1018,6 +1201,194 @@ mod tests {
         }
         assert!(m.projs.is_empty());
         assert!(!m.blasts.is_empty());
+        assert!(terrain.count_solid() < before);
+    }
+
+    #[test]
+    fn cluster_children_span_full_circle() {
+        let (mut terrain, mut m) = dry_floor(11);
+        m.projs.push(Projectile {
+            pos: Vec3::new(200.0, 200.0, 0.0),
+            vel: Vec3::ZERO,
+            kind: Kind::Cluster,
+            fuse: 0.01,
+            ttl: 6.0,
+            age: 0.0,
+            owner: 0,
+            radius: 12.0,
+            damage: 20.0,
+            gravity: 0.0,
+            weapon: 3,
+            generation: 0,
+        });
+        m.phase = Phase::Retreat;
+        m.timer = 2.0;
+        m.step(&mut terrain, &[], Control::default(), DT);
+        assert_eq!(m.projs.len(), 6);
+        // Undo the small upward bias and measure circular span of launch directions.
+        let mut angles: Vec<f32> = m
+            .projs
+            .iter()
+            .map(|p| (p.vel.y - 28.0).atan2(p.vel.x))
+            .collect();
+        angles.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let mut gaps = Vec::new();
+        for w in angles.windows(2) {
+            gaps.push(w[1] - w[0]);
+        }
+        gaps.push(angles[0] + std::f32::consts::TAU - angles[angles.len() - 1]);
+        let max_gap = gaps.into_iter().fold(0.0f32, f32::max);
+        let span = std::f32::consts::TAU - max_gap;
+        assert!(
+            span > std::f32::consts::PI,
+            "child angles should span more than π (span {span})"
+        );
+    }
+
+    #[test]
+    fn banana_splits_three_generations_then_stops() {
+        let (mut terrain, mut m) = dry_floor(12);
+        // Drop onto the floor so contact drives the whole recursive chain.
+        m.projs.push(Projectile {
+            pos: Vec3::new(200.0, 80.0, 0.0),
+            vel: Vec3::new(0.0, -160.0, 0.0),
+            kind: Kind::Banana,
+            fuse: 99.0,
+            ttl: 4.0,
+            age: 0.35,
+            owner: 0,
+            radius: 14.0,
+            damage: 25.0,
+            gravity: 1.0,
+            weapon: 4,
+            generation: BANANA_GEN,
+        });
+        m.phase = Phase::Retreat;
+        m.timer = 30.0;
+        let mut max_kids = 0usize;
+        let mut saw_gen0 = false;
+        for _ in 0..1200 {
+            m.step(&mut terrain, &[], Control::default(), DT);
+            max_kids = max_kids.max(m.projs.len());
+            if m.projs.iter().any(|p| p.kind == Kind::Banana && p.generation == 0) {
+                saw_gen0 = true;
+            }
+            if m.projs.is_empty() {
+                break;
+            }
+        }
+        assert!(saw_gen0, "should reach generation 0");
+        assert!(max_kids >= 2, "should spawn children");
+        // Contact-only chain: some kids may leave the map before landing, so
+        // don't require the theoretical 15 hits — just a deep recursive burst.
+        assert!(
+            m.blasts.len() >= 4,
+            "expected several contact blasts, got {}",
+            m.blasts.len()
+        );
+        assert!(
+            !m.projs.iter().any(|p| p.kind == Kind::Banana && p.generation > 0),
+            "higher generations should have finished splitting"
+        );
+    }
+
+    #[test]
+    fn banana_gen0_does_not_split() {
+        let (mut terrain, mut m) = dry_floor(13);
+        m.projs.push(Projectile {
+            pos: Vec3::new(200.0, 55.0, 0.0),
+            vel: Vec3::new(0.0, -120.0, 0.0),
+            kind: Kind::Banana,
+            fuse: 99.0,
+            ttl: 4.0,
+            age: 0.35,
+            owner: 0,
+            radius: 14.0,
+            damage: 25.0,
+            gravity: 1.0,
+            weapon: 4,
+            generation: 0,
+        });
+        m.phase = Phase::Retreat;
+        m.timer = 2.0;
+        for _ in 0..40 {
+            m.step(&mut terrain, &[], Control::default(), DT);
+            if m.projs.is_empty() {
+                break;
+            }
+        }
+        assert!(m.projs.is_empty());
+        assert_eq!(m.blasts.len(), 1);
+    }
+
+    #[test]
+    fn banana_children_do_not_airburst() {
+        let (mut terrain, mut m) = dry_floor(15);
+        m.projs.push(Projectile {
+            pos: Vec3::new(200.0, 55.0, 0.0),
+            vel: Vec3::new(0.0, -120.0, 0.0),
+            kind: Kind::Banana,
+            fuse: 99.0,
+            ttl: 4.0,
+            age: 0.35,
+            owner: 0,
+            radius: 14.0,
+            damage: 25.0,
+            gravity: 1.0,
+            weapon: 4,
+            generation: 1,
+        });
+        m.phase = Phase::Retreat;
+        m.timer = 4.0;
+        // Parent hits dirt and splits.
+        for _ in 0..40 {
+            m.step(&mut terrain, &[], Control::default(), DT);
+            if m.projs.iter().any(|p| p.generation == 0) {
+                break;
+            }
+        }
+        assert!(
+            m.projs.iter().any(|p| p.kind == Kind::Banana && p.generation == 0),
+            "should have spawned children"
+        );
+        // Children must still be flying after well past the old 0.4–0.8s fuse.
+        for _ in 0..60 {
+            m.step(&mut terrain, &[], Control::default(), DT);
+        }
+        assert!(
+            m.projs.iter().any(|p| p.kind == Kind::Banana && p.age > 0.9),
+            "children should still be airborne, not fuse-popped"
+        );
+    }
+
+    #[test]
+    fn banana_explodes_on_dirt_contact() {
+        let (mut terrain, mut m) = dry_floor(14);
+        let before = terrain.count_solid();
+        m.projs.push(Projectile {
+            pos: Vec3::new(120.0, 55.0, 0.0),
+            vel: Vec3::new(0.0, -120.0, 0.0),
+            kind: Kind::Banana,
+            fuse: 5.0,
+            ttl: 4.0,
+            age: 0.35,
+            owner: 0,
+            radius: 14.0,
+            damage: 25.0,
+            gravity: 1.0,
+            weapon: 4,
+            generation: 0,
+        });
+        m.phase = Phase::Retreat;
+        m.timer = 2.0;
+        for _ in 0..50 {
+            m.step(&mut terrain, &[], Control::default(), DT);
+            if m.projs.is_empty() {
+                break;
+            }
+        }
+        assert!(m.projs.is_empty(), "banana should not bounce");
+        assert_eq!(m.blasts.len(), 1);
         assert!(terrain.count_solid() < before);
     }
 }

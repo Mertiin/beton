@@ -84,8 +84,13 @@ impl NetDriver {
         }));
 
         let config = RtcConfiguration::new();
-        // Empty iceServers: LAN / localhost only (host advertises real candidates).
-        config.set_ice_servers(&js_sys::Array::new());
+        // Public STUN so browser clients can reach a Hetzner / internet host.
+        let ice_servers = js_sys::Array::new();
+        let stun = web_sys::RtcIceServer::new();
+        let urls = js_sys::Array::of1(&JsValue::from_str("stun:stun.l.google.com:19302"));
+        stun.set_urls(&urls);
+        ice_servers.push(&stun);
+        config.set_ice_servers(&ice_servers);
         let pc = RtcPeerConnection::new_with_configuration(&config)
             .map_err(|err| format!("RTCPeerConnection: {err:?}"))?;
 

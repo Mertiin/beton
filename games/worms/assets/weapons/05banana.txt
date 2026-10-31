@@ -1,0 +1,16 @@
+blast_radius = 16
+damage = 36
+speed = 145
+gravity = 1.05
+trail = 14
+fragments = 10
+fragment_speed = 60
+fragment_life = 0.35
+effect = glow
+blend = add
+behavior = banana
+ammo = 2
+fuse = 2.0
+pellets = 1
+spread = 0.55
+children = 0

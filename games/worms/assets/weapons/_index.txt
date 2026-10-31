@@ -2,3 +2,4 @@
 02grenade.txt
 03shotgun.txt
 04cluster.txt
+05banana.txt

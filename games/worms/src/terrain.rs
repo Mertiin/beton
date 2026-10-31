@@ -1,11 +1,11 @@
-//! Bitmap dirt: collision mask + RGBA. 480×270 so a packed mask fits in one net packet.
+//! Bitmap dirt: collision mask + RGBA. 960×540; mask resync uses chunked net packets.
 
 use std::sync::OnceLock;
 
 use beton::Rng;
 
-pub const MAP_W: u32 = 480;
-pub const MAP_H: u32 = 270;
+pub const MAP_W: u32 = 960;
+pub const MAP_H: u32 = 540;
 
 fn ground_image() -> &'static image::RgbaImage {
     static GROUND: OnceLock<image::RgbaImage> = OnceLock::new();
@@ -37,26 +37,26 @@ impl Terrain {
     pub fn generate(seed: u64) -> Self {
         let mut rng = Rng::new(seed);
         let mut heights = vec![0.0f32; MAP_W as usize];
-        let mid = 120.0;
+        let mid = 240.0;
         let waves = [
             (
-                rng.range(0.006, 0.014),
-                rng.range(22.0, 48.0),
+                rng.range(0.004, 0.010),
+                rng.range(40.0, 90.0),
                 rng.range(0.0, 6.28),
             ),
             (
-                rng.range(0.016, 0.032),
-                rng.range(8.0, 18.0),
+                rng.range(0.012, 0.024),
+                rng.range(14.0, 32.0),
                 rng.range(0.0, 6.28),
             ),
             (
-                rng.range(0.034, 0.055),
-                rng.range(2.0, 6.0),
+                rng.range(0.026, 0.045),
+                rng.range(4.0, 12.0),
                 rng.range(0.0, 6.28),
             ),
         ];
-        let floor = 64.0;
-        let ceiling = 210.0;
+        let floor = 128.0;
+        let ceiling = 420.0;
         for (x, hgt) in heights.iter_mut().enumerate() {
             let xf = x as f32;
             let mut h = mid;
@@ -351,7 +351,7 @@ mod tests {
         let t = Terrain::generate(0xC0FFEE);
         for x in 0..MAP_W as i32 {
             let y = t.surface_y(x).expect("column");
-            assert!(y > 48.0, "surface {y} too low at {x}");
+            assert!(y > 100.0, "surface {y} too low at {x}");
         }
     }
 
@@ -359,7 +359,7 @@ mod tests {
     fn stamp_clears_pixels_and_roundtrips() {
         let mut t = Terrain::generate(1);
         let before = t.count_solid();
-        t.stamp_circle(MAP_W as f32 * 0.5, 80.0, 18.0);
+        t.stamp_circle(MAP_W as f32 * 0.5, 200.0, 28.0);
         assert!(t.count_solid() < before);
         let packed = t.pack_solid();
         assert_eq!(packed.len(), (MAP_W * MAP_H / 8) as usize);

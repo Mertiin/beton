@@ -64,6 +64,7 @@ web-sys = { workspace = true, features = [
     "RtcSdpType",
     "RtcIceCandidate",
     "RtcIceCandidateInit",
+    "RtcIceServer",
     "RtcPeerConnectionIceEvent",
     "RtcDataChannel",
     "RtcDataChannelEvent",

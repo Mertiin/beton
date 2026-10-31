@@ -1,0 +1,38 @@
+# Mirror Hotpot: on push to main, ask Coolify to rebuild/redeploy worms-lobby.
+# Requires GitHub secrets (same pattern as Hotpot):
+#   COOLIFY_TOKEN
+#   COOLIFY_WORMS_WEBHOOK  (Deploy Webhook URL from the Coolify worms-lobby resource)
+name: Deploy worms-lobby
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - "games/worms/**"
+      - "games/worms-lobby/**"
+      - "crates/beton/**"
+      - "deploy/worms-lobby/**"
+      - "docker-compose.worms-lobby.yml"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/deploy-worms-lobby.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Coolify
+        run: |
+          if [ -z "${{ secrets.COOLIFY_WORMS_WEBHOOK }}" ] || [ -z "${{ secrets.COOLIFY_TOKEN }}" ]; then
+            echo "::warning::COOLIFY_WORMS_WEBHOOK / COOLIFY_TOKEN not set — skip deploy"
+            exit 0
+          fi
+          status=$(curl -s --request POST "${{ secrets.COOLIFY_WORMS_WEBHOOK }}" \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+            --output response.txt --write-out '%{http_code}')
+          echo "Coolify responded with HTTP $status"
+          cat response.txt
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            echo "::error::Coolify deploy failed with HTTP $status"
+            exit 1
+          fi

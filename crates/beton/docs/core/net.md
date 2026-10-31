@@ -13,9 +13,11 @@ Use it like [`Input`](input.md): each frame the engine drains into `ctx.net.even
 | Host (`Net::host`) | Listen on `0.0.0.0:port` (signaling TCP) + WebRTC UDP | Always errors — tabs cannot listen |
 | Client (`Net::connect`) | Dial `ws://host:port`, then WebRTC | Same, via `WebSocket` + `RTCPeerConnection` |
 
-A match is therefore a **desktop host** plus desktop or browser clients. Only `ws://` for signaling (no TLS). `wss://` is out of scope for this slice.
+A match is therefore a **desktop host** plus desktop or browser clients. Signaling accepts `ws://` and `wss://` (native TLS via rustls).
 
-**Mixed content:** an `https://` page (e.g. GitHub Pages) may open `ws://` only to `localhost` / `127.0.0.1`, or `wss://` to any host. Plain `ws://` to a public/LAN IP is blocked by the browser. For remote play from Pages, put TLS in front of the desktop host (Caddy/nginx) and connect with `wss://…`. For LAN testing without TLS, use `trunk serve` (http) instead of Pages.
+**Mixed content:** an `https://` page (e.g. GitHub Pages) may open `ws://` only to `localhost` / `127.0.0.1`, or `wss://` to any host. Plain `ws://` to a public/LAN IP is blocked by the browser. For remote play from Pages, put TLS in front of the host (Caddy/nginx) and connect with `wss://…`. For LAN testing without TLS, use `trunk serve` (http) instead of Pages.
+
+Browser ICE includes a public STUN server. Dedicated hosts can set `BETON_PUBLIC_IP` so host candidates advertise the VPS address.
 
 ## Types
 

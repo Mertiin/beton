@@ -4,7 +4,7 @@
 //! channels over UDP: `"rel"` (reliable ordered) and `"dg"` (unreliable unordered).
 
 use std::collections::HashMap;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Read, Write};
 use std::net::{IpAddr, Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
@@ -16,6 +16,7 @@ use str0m::change::{SdpAnswer, SdpOffer, SdpPendingOffer};
 use str0m::channel::{ChannelConfig, ChannelId, Reliability};
 use str0m::net::{Protocol, Receive};
 use str0m::{Candidate, Event, IceConnectionState, Input, Output, Rtc};
+use tungstenite::stream::MaybeTlsStream;
 use tungstenite::{accept, client, Message, WebSocket};
 
 use crate::core::net::{NetEvent, PeerId, MAX_INBOUND, MAX_PAYLOAD, MAX_PEERS};
@@ -175,6 +176,14 @@ fn local_ipv4s() -> Vec<Ipv4Addr> {
             }
         }
     }
+    // Optional public address for Hetzner / VPS hosts (host ICE candidates).
+    if let Ok(raw) = std::env::var("BETON_PUBLIC_IP") {
+        if let Ok(ip) = raw.parse::<Ipv4Addr>() {
+            if !ips.contains(&ip) {
+                ips.push(ip);
+            }
+        }
+    }
     ips
 }
 
@@ -262,6 +271,31 @@ fn spawn_peer_io(
     })
 }
 
+fn spawn_peer_io_tls(
+    peer: PeerId,
+    mut ws: WebSocket<MaybeTlsStream<TcpStream>>,
+    events: Arc<Mutex<Vec<NetEvent>>>,
+    slots: Arc<PeerSlots>,
+    stop: Arc<AtomicBool>,
+) -> JoinHandle<()> {
+    match ws.get_mut() {
+        MaybeTlsStream::Plain(s) => {
+            let _ = s.set_read_timeout(Some(Duration::from_millis(20)));
+        }
+        MaybeTlsStream::Rustls(s) => {
+            let _ = s.get_mut().set_read_timeout(Some(Duration::from_millis(20)));
+        }
+        _ => {}
+    }
+    let (tx, rx) = mpsc::channel::<Outbound>();
+    if let Ok(mut guard) = slots.writers.lock() {
+        guard.insert(peer, tx);
+    }
+    thread::spawn(move || {
+        peer_io_loop(peer, ws, rx, events, slots, stop, false);
+    })
+}
+
 struct ChannelMap {
     rel: Option<ChannelId>,
     dg: Option<ChannelId>,
@@ -290,9 +324,9 @@ impl ChannelMap {
     }
 }
 
-fn peer_io_loop(
+fn peer_io_loop<S: Read + Write>(
     peer: PeerId,
-    mut ws: WebSocket<TcpStream>,
+    mut ws: WebSocket<S>,
     rx: Receiver<Outbound>,
     events: Arc<Mutex<Vec<NetEvent>>>,
     slots: Arc<PeerSlots>,
@@ -316,8 +350,8 @@ fn peer_io_loop(
     }
 }
 
-fn run_webrtc_peer(
-    ws: &mut WebSocket<TcpStream>,
+fn run_webrtc_peer<S: Read + Write>(
+    ws: &mut WebSocket<S>,
     rx: &Receiver<Outbound>,
     events: &Mutex<Vec<NetEvent>>,
     stop: &AtomicBool,
@@ -333,7 +367,12 @@ fn run_webrtc_peer(
         .map_err(|e| format!("udp local_addr: {e}"))?
         .port();
 
-    let mut rtc = Rtc::new(Instant::now());
+    // Hosts (esp. dedicated VPS) use ice-lite; clients do full ICE.
+    let mut rtc = if is_host {
+        Rtc::builder().set_ice_lite(true).build(Instant::now())
+    } else {
+        Rtc::new(Instant::now())
+    };
     let local_candidates = add_host_candidates(&mut rtc, local_port);
 
     let mut pending: Option<SdpPendingOffer> = None;
@@ -633,41 +672,64 @@ impl NetDriver {
     }
 
     pub fn connect(url: &str) -> Result<Self, String> {
-        let (host, port, path) = parse_ws_url(url)?;
-        let stream = TcpStream::connect((host.as_str(), port))
-            .map_err(|err| format!("net connect tcp: {err}"))?;
-        stream
-            .set_nodelay(true)
-            .map_err(|err| format!("net connect nodelay: {err}"))?;
-
-        let stream_for_ws = stream
-            .try_clone()
-            .map_err(|err| format!("net connect clone: {err}"))?;
-        let (ws, _response) =
-            client::client(format!("ws://{host}:{port}{path}"), stream_for_ws)
-                .map_err(|err| format!("net connect handshake: {err}"))?;
-
+        let (tls, host, port, path) = parse_ws_url(url)?;
         let events = Arc::new(Mutex::new(Vec::new()));
         let slots = Arc::new(PeerSlots::new());
         let stop = Arc::new(AtomicBool::new(false));
-        let handle = spawn_peer_io(
-            PeerId::HOST,
-            stream,
-            ws,
-            Arc::clone(&events),
-            Arc::clone(&slots),
-            Arc::clone(&stop),
-            false,
-        );
 
-        Ok(Self {
-            events,
-            slots,
-            stop,
-            listener: None,
-            threads: vec![handle],
-            is_host: false,
-        })
+        if tls {
+            // TLS WebSocket: tungstenite owns the stream; peer IO uses MaybeTls.
+            let ws_url = format!("wss://{host}:{port}{path}");
+            let (ws, _response) = tungstenite::connect(&ws_url)
+                .map_err(|err| format!("net connect wss: {err}"))?;
+            let handle = spawn_peer_io_tls(
+                PeerId::HOST,
+                ws,
+                Arc::clone(&events),
+                Arc::clone(&slots),
+                Arc::clone(&stop),
+            );
+            Ok(Self {
+                events,
+                slots,
+                stop,
+                listener: None,
+                threads: vec![handle],
+                is_host: false,
+            })
+        } else {
+            let stream = TcpStream::connect((host.as_str(), port))
+                .map_err(|err| format!("net connect tcp: {err}"))?;
+            stream
+                .set_nodelay(true)
+                .map_err(|err| format!("net connect nodelay: {err}"))?;
+
+            let stream_for_ws = stream
+                .try_clone()
+                .map_err(|err| format!("net connect clone: {err}"))?;
+            let (ws, _response) =
+                client::client(format!("ws://{host}:{port}{path}"), stream_for_ws)
+                    .map_err(|err| format!("net connect handshake: {err}"))?;
+
+            let handle = spawn_peer_io(
+                PeerId::HOST,
+                stream,
+                ws,
+                Arc::clone(&events),
+                Arc::clone(&slots),
+                Arc::clone(&stop),
+                false,
+            );
+
+            Ok(Self {
+                events,
+                slots,
+                stop,
+                listener: None,
+                threads: vec![handle],
+                is_host: false,
+            })
+        }
     }
 
     pub fn poll(&mut self) -> Vec<NetEvent> {
@@ -775,24 +837,34 @@ fn accept_loop(
     }
 }
 
-fn parse_ws_url(url: &str) -> Result<(String, u16, String), String> {
-    let rest = url
-        .strip_prefix("ws://")
-        .ok_or_else(|| "only ws:// URLs are supported (no TLS)".to_string())?;
+fn parse_ws_url(url: &str) -> Result<(bool, String, u16, String), String> {
+    let (tls, rest) = if let Some(rest) = url.strip_prefix("wss://") {
+        (true, rest)
+    } else if let Some(rest) = url.strip_prefix("ws://") {
+        (false, rest)
+    } else {
+        return Err("URL must start with ws:// or wss://".into());
+    };
     let (hostport, path) = match rest.split_once('/') {
         Some((hp, p)) => (hp, format!("/{p}")),
         None => (rest, "/".to_string()),
     };
-    let (host, port) = if let Some((h, p)) = hostport.split_once(':') {
-        let port: u16 = p
-            .parse()
-            .map_err(|_| format!("invalid port in URL: {url}"))?;
-        (h.to_string(), port)
+    let default_port = if tls { 443 } else { 80 };
+    let (host, port) = if let Some((h, p)) = hostport.rsplit_once(':') {
+        // Avoid splitting IPv6; only treat as port if numeric.
+        if p.chars().all(|c| c.is_ascii_digit()) {
+            let port: u16 = p
+                .parse()
+                .map_err(|_| format!("invalid port in URL: {url}"))?;
+            (h.to_string(), port)
+        } else {
+            (hostport.to_string(), default_port)
+        }
     } else {
-        (hostport.to_string(), 80)
+        (hostport.to_string(), default_port)
     };
     if host.is_empty() {
         return Err(format!("invalid host in URL: {url}"));
     }
-    Ok((host, port, path))
+    Ok((tls, host, port, path))
 }

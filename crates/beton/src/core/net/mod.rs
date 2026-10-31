@@ -111,7 +111,7 @@ impl Net {
         Ok(())
     }
 
-    /// Dial a `ws://host:port` URL (signaling). Fails if already open.
+    /// Dial a `ws://` or `wss://` signaling URL. Fails if already open.
     ///
     /// Game bytes use WebRTC after the handshake; [`NetEvent::Connected`] fires when ready.
     pub fn connect(&mut self, url: &str) -> Result<(), String> {

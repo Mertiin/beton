@@ -29,6 +29,8 @@ pub fn hand_col(name: &str) -> u32 {
         2
     } else if name.contains("cluster") {
         5
+    } else if name.contains("banana") {
+        6
     } else {
         0
     }
@@ -58,9 +60,10 @@ pub fn power_uv() -> [f32; 4] {
 
 pub fn proj_draw(kind: u8) -> (u32, [f32; 2]) {
     match kind {
-        1 => (1, [7.0, 7.0]),       // grenade
-        2 => (4, [3.0, 3.0]),       // pellet
-        3 => (5, [8.0, 8.0]),       // cluster
-        _ => (4, [6.0, 6.0]),       // bazooka shell
+        1 => (1, [7.0, 7.0]), // grenade
+        2 => (4, [3.0, 3.0]), // pellet
+        3 => (5, [8.0, 8.0]), // cluster
+        4 => (6, [7.0, 7.0]), // banana
+        _ => (4, [6.0, 6.0]), // bazooka shell
     }
 }

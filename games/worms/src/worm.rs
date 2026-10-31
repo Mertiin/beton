@@ -17,6 +17,8 @@ pub struct Body {
     pub pos: Vec3,
     pub vel: Vec3,
     pub grounded: bool,
+    /// Frames spent with feet off dirt; airborne pose needs 2.
+    pub air_frames: u8,
     pub facing: f32,
     pub travel: f32,
     pub hp: f32,
@@ -30,6 +32,7 @@ impl Body {
             pos: Vec3::new(x, y, 0.0),
             vel: Vec3::ZERO,
             grounded: true,
+            air_frames: 0,
             facing: 1.0,
             travel: 0.0,
             hp: 100.0,
@@ -64,6 +67,7 @@ pub fn step_body(
     if can && body.grounded && jump {
         body.vel.y = JUMP_SPEED;
         body.grounded = false;
+        body.air_frames = 2;
     }
     if can && wish_x != 0.0 && body.grounded {
         let dir = wish_x.signum();
@@ -113,10 +117,14 @@ pub fn step_body(
             body.pos.y -= body.vel.y * dt;
             body.vel.y = 0.0;
         }
+    } else if feet_on_ground(terrain, body.pos.x, body.pos.y) {
+        body.grounded = true;
+        body.air_frames = 0;
+        body.vel.y = 0.0;
     } else {
-        body.grounded = feet_on_ground(terrain, body.pos.x, body.pos.y);
-        if body.grounded {
-            body.vel.y = 0.0;
+        body.air_frames = body.air_frames.saturating_add(1);
+        if body.air_frames >= 2 {
+            body.grounded = false;
         }
     }
 
