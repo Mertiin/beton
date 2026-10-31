@@ -271,6 +271,13 @@ fn decode_signal(bytes: &[u8]) -> Option<(u8, &[u8])> {
 }
 
 fn local_ipv4s() -> Vec<Ipv4Addr> {
+    // VPS / Docker: only advertise the public address. Private bridge IPs
+    // (172.x) are unreachable from clients and make CONNECTING hang forever.
+    if let Ok(raw) = std::env::var("BETON_PUBLIC_IP") {
+        if let Ok(ip) = raw.parse::<Ipv4Addr>() {
+            return vec![ip];
+        }
+    }
     let mut ips = vec![Ipv4Addr::LOCALHOST];
     if let Ok(socket) = UdpSocket::bind("0.0.0.0:0") {
         if socket.connect("8.8.8.8:80").is_ok() {
@@ -279,14 +286,6 @@ fn local_ipv4s() -> Vec<Ipv4Addr> {
                 if !ip.is_unspecified() && !ips.contains(&ip) {
                     ips.push(ip);
                 }
-            }
-        }
-    }
-    // Optional public address for Hetzner / VPS hosts (host ICE candidates).
-    if let Ok(raw) = std::env::var("BETON_PUBLIC_IP") {
-        if let Ok(ip) = raw.parse::<Ipv4Addr>() {
-            if !ips.contains(&ip) {
-                ips.push(ip);
             }
         }
     }
