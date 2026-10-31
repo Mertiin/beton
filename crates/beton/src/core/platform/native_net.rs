@@ -40,6 +40,112 @@ struct PeerSlots {
     streams: Mutex<Vec<TcpStream>>,
 }
 
+/// One UDP socket per host, bound to the signaling TCP port so Docker can publish
+/// `7800-7899/udp` and browser WebRTC can reach ice-lite candidates.
+struct HostMedia {
+    socket: UdpSocket,
+    port: u16,
+    fans: Mutex<Vec<Sender<(SocketAddr, Vec<u8>)>>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl HostMedia {
+    fn bind(port: u16, stop: Arc<AtomicBool>) -> Result<Arc<Self>, String> {
+        let socket = UdpSocket::bind(("0.0.0.0", port))
+            .map_err(|e| format!("host udp bind :{port}: {e}"))?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|e| format!("host udp nonblocking: {e}"))?;
+        let media = Arc::new(Self {
+            socket,
+            port,
+            fans: Mutex::new(Vec::new()),
+            stop,
+        });
+        let demux = Arc::clone(&media);
+        thread::spawn(move || {
+            let mut buf = vec![0u8; 2000];
+            while !demux.stop.load(Ordering::SeqCst) {
+                match demux.socket.recv_from(&mut buf) {
+                    Ok((n, source)) => {
+                        let pkt = buf[..n].to_vec();
+                        if let Ok(mut fans) = demux.fans.lock() {
+                            fans.retain(|tx| tx.send((source, pkt.clone())).is_ok());
+                        }
+                    }
+                    Err(e)
+                        if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut =>
+                    {
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+        Ok(media)
+    }
+
+    fn subscribe(
+        self: &Arc<Self>,
+    ) -> Result<(Arc<UdpSocket>, u16, Receiver<(SocketAddr, Vec<u8>)>), String> {
+        let (tx, rx) = mpsc::channel();
+        if let Ok(mut fans) = self.fans.lock() {
+            fans.push(tx);
+        }
+        let socket = self
+            .socket
+            .try_clone()
+            .map_err(|e| format!("clone host udp: {e}"))?;
+        Ok((Arc::new(socket), self.port, rx))
+    }
+}
+
+enum UdpIo {
+    /// Ephemeral client socket (NAT-friendly).
+    Own {
+        socket: UdpSocket,
+        port: u16,
+    },
+    /// Shared host socket fan-out (published Docker port).
+    Shared {
+        socket: Arc<UdpSocket>,
+        port: u16,
+        rx: Receiver<(SocketAddr, Vec<u8>)>,
+    },
+}
+
+impl UdpIo {
+    fn port(&self) -> u16 {
+        match self {
+            Self::Own { port, .. } | Self::Shared { port, .. } => *port,
+        }
+    }
+
+    fn send_to(&self, buf: &[u8], dest: SocketAddr) -> std::io::Result<usize> {
+        match self {
+            Self::Own { socket, .. } => socket.send_to(buf, dest),
+            Self::Shared { socket, .. } => socket.send_to(buf, dest),
+        }
+    }
+
+    fn try_recv(&self, buf: &mut [u8]) -> Option<(usize, SocketAddr)> {
+        match self {
+            Self::Own { socket, .. } => match socket.recv_from(buf) {
+                Ok((n, src)) => Some((n, src)),
+                Err(_) => None,
+            },
+            Self::Shared { rx, .. } => match rx.try_recv() {
+                Ok((src, pkt)) => {
+                    let n = pkt.len().min(buf.len());
+                    buf[..n].copy_from_slice(&pkt[..n]);
+                    Some((n, src))
+                }
+                Err(_) => None,
+            },
+        }
+    }
+}
+
 impl PeerSlots {
     fn new() -> Self {
         Self {
@@ -256,6 +362,7 @@ fn spawn_peer_io(
     slots: Arc<PeerSlots>,
     stop: Arc<AtomicBool>,
     is_host: bool,
+    host_media: Option<Arc<HostMedia>>,
 ) -> JoinHandle<()> {
     let _ = ws
         .get_ref()
@@ -267,7 +374,7 @@ fn spawn_peer_io(
     }
 
     thread::spawn(move || {
-        peer_io_loop(peer, ws, rx, events, slots, stop, is_host);
+        peer_io_loop(peer, ws, rx, events, slots, stop, is_host, host_media);
     })
 }
 
@@ -292,7 +399,7 @@ fn spawn_peer_io_tls(
         guard.insert(peer, tx);
     }
     thread::spawn(move || {
-        peer_io_loop(peer, ws, rx, events, slots, stop, false);
+        peer_io_loop(peer, ws, rx, events, slots, stop, false, None);
     })
 }
 
@@ -332,9 +439,19 @@ fn peer_io_loop<S: Read + Write>(
     slots: Arc<PeerSlots>,
     stop: Arc<AtomicBool>,
     is_host: bool,
+    host_media: Option<Arc<HostMedia>>,
 ) {
     let from = if is_host { peer } else { PeerId::HOST };
-    let result = run_webrtc_peer(&mut ws, &rx, &events, stop.as_ref(), is_host, from, peer);
+    let result = run_webrtc_peer(
+        &mut ws,
+        &rx,
+        &events,
+        stop.as_ref(),
+        is_host,
+        from,
+        peer,
+        host_media,
+    );
 
     slots.remove_writer(peer);
     let _ = ws.close(None);
@@ -358,14 +475,23 @@ fn run_webrtc_peer<S: Read + Write>(
     is_host: bool,
     from: PeerId,
     peer: PeerId,
+    host_media: Option<Arc<HostMedia>>,
 ) -> Result<(), String> {
-    let udp = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("udp bind: {e}"))?;
-    udp.set_nonblocking(true)
-        .map_err(|e| format!("udp nonblocking: {e}"))?;
-    let local_port = udp
-        .local_addr()
-        .map_err(|e| format!("udp local_addr: {e}"))?
-        .port();
+    let udp = if let Some(media) = host_media.as_ref() {
+        let (socket, port, rx) = media.subscribe()?;
+        UdpIo::Shared { socket, port, rx }
+    } else {
+        let socket = UdpSocket::bind("0.0.0.0:0").map_err(|e| format!("udp bind: {e}"))?;
+        socket
+            .set_nonblocking(true)
+            .map_err(|e| format!("udp nonblocking: {e}"))?;
+        let port = socket
+            .local_addr()
+            .map_err(|e| format!("udp local_addr: {e}"))?
+            .port();
+        UdpIo::Own { socket, port }
+    };
+    let local_port = udp.port();
 
     // Hosts (esp. dedicated VPS) use ice-lite; clients do full ICE.
     let mut rtc = if is_host {
@@ -469,30 +595,26 @@ fn run_webrtc_peer<S: Read + Write>(
             break;
         }
 
-        // UDP input.
+        // UDP input (own socket or shared host fan-out).
         loop {
-            match udp.recv_from(&mut buf) {
-                Ok((n, source)) => {
-                    let destination = receive_destination(local_port, source);
-                    let Ok(contents) = buf[..n].try_into() else {
-                        continue;
-                    };
-                    let recv = Receive {
-                        proto: Protocol::Udp,
-                        source,
-                        destination,
-                        contents,
-                    };
-                    let _ = rtc.handle_input(Input::Receive(Instant::now(), recv));
-                }
-                Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
-                    break;
-                }
-                Err(_) => {
-                    closing = true;
-                    break;
-                }
+            let Some((n, source)) = udp.try_recv(&mut buf) else {
+                break;
+            };
+            let destination = receive_destination(local_port, source);
+            let Ok(contents) = buf[..n].try_into() else {
+                continue;
+            };
+            let recv = Receive {
+                proto: Protocol::Udp,
+                source,
+                destination,
+                contents,
+            };
+            let input = Input::Receive(Instant::now(), recv);
+            if is_host && !rtc.accepts(&input) {
+                continue;
             }
+            let _ = rtc.handle_input(input);
         }
         if closing {
             break;
@@ -634,6 +756,9 @@ pub struct NetDriver {
     slots: Arc<PeerSlots>,
     stop: Arc<AtomicBool>,
     listener: Option<TcpListener>,
+    /// Kept alive so the shared UDP demux outlives peer threads.
+    #[allow(dead_code)]
+    host_media: Option<Arc<HostMedia>>,
     threads: Vec<JoinHandle<()>>,
     is_host: bool,
 }
@@ -650,6 +775,8 @@ impl NetDriver {
         let events = Arc::new(Mutex::new(vec![NetEvent::Listening { port: bound }]));
         let slots = Arc::new(PeerSlots::new());
         let stop = Arc::new(AtomicBool::new(false));
+        // Same port number as TCP signaling — Docker publishes both TCP+UDP.
+        let host_media = HostMedia::bind(bound, Arc::clone(&stop))?;
 
         let accept_listener = listener
             .try_clone()
@@ -657,8 +784,15 @@ impl NetDriver {
         let accept_events = Arc::clone(&events);
         let accept_slots = Arc::clone(&slots);
         let accept_stop = Arc::clone(&stop);
+        let accept_media = Arc::clone(&host_media);
         let accept_handle = thread::spawn(move || {
-            accept_loop(accept_listener, accept_events, accept_slots, accept_stop);
+            accept_loop(
+                accept_listener,
+                accept_events,
+                accept_slots,
+                accept_stop,
+                accept_media,
+            );
         });
 
         Ok(Self {
@@ -666,6 +800,7 @@ impl NetDriver {
             slots,
             stop,
             listener: Some(listener),
+            host_media: Some(host_media),
             threads: vec![accept_handle],
             is_host: true,
         })
@@ -694,6 +829,7 @@ impl NetDriver {
                 slots,
                 stop,
                 listener: None,
+                host_media: None,
                 threads: vec![handle],
                 is_host: false,
             })
@@ -719,6 +855,7 @@ impl NetDriver {
                 Arc::clone(&slots),
                 Arc::clone(&stop),
                 false,
+                None,
             );
 
             Ok(Self {
@@ -726,6 +863,7 @@ impl NetDriver {
                 slots,
                 stop,
                 listener: None,
+                host_media: None,
                 threads: vec![handle],
                 is_host: false,
             })
@@ -792,6 +930,7 @@ fn accept_loop(
     events: Arc<Mutex<Vec<NetEvent>>>,
     slots: Arc<PeerSlots>,
     stop: Arc<AtomicBool>,
+    host_media: Arc<HostMedia>,
 ) {
     let mut peer_threads: Vec<JoinHandle<()>> = Vec::new();
     while !stop.load(Ordering::SeqCst) {
@@ -829,6 +968,7 @@ fn accept_loop(
             Arc::clone(&slots),
             Arc::clone(&stop),
             true,
+            Some(Arc::clone(&host_media)),
         );
         peer_threads.push(handle);
     }
