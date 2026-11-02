@@ -49,7 +49,10 @@ pub fn list_rooms(base: &str) -> Result<Vec<RoomInfo>, String> {
     let rooms: Vec<RoomInfo> = http_get_json(&url)?;
     Ok(rooms
         .into_iter()
-        .filter(|r| r.game.as_deref() == Some(GAME_ID))
+        .filter(|r| {
+            r.game.as_deref() == Some(GAME_ID)
+                || r.name.to_ascii_lowercase().contains("mine")
+        })
         .collect())
 }
 
@@ -65,9 +68,39 @@ pub fn create_room(base: &str, name: &str) -> Result<CreateRoom, String> {
 }
 
 /// Always-on public BR server: `GET /api/minesweeper`.
+///
+/// Falls back to listing/creating a mines room if the lobby build is older.
 pub fn public_server(base: &str) -> Result<RoomInfo, String> {
     let url = format!("{}/api/minesweeper", trim_base(base));
-    http_get_json(&url)
+    match http_get_json::<RoomInfo>(&url) {
+        Ok(info) => Ok(info),
+        Err(e) => {
+            // Older lobby (no /api/minesweeper): join an existing mines lobby room
+            // or ask the lobby to spawn one.
+            if let Ok(rooms) = list_rooms(base) {
+                if let Some(room) = rooms
+                    .into_iter()
+                    .find(|r| r.status == "lobby" || r.status == "starting")
+                {
+                    return Ok(room);
+                }
+            }
+            // list_rooms filters by game=; old lobbies ignore the query and may
+            // return worms rooms — prefer create which new lobbies remap to public.
+            match create_room(base, "Minesweeper BR") {
+                Ok(created) => Ok(RoomInfo {
+                    id: created.id,
+                    name: created.name,
+                    players: 0,
+                    max_players: 50,
+                    status: "lobby".into(),
+                    join_url: created.join_url,
+                    game: Some(GAME_ID.into()),
+                }),
+                Err(create_err) => Err(format!("{e}; fallback: {create_err}")),
+            }
+        }
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

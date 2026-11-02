@@ -3,7 +3,8 @@
 #   Base Directory: /
 #   Dockerfile: deploy/worms-lobby/Dockerfile
 #   Port: 8080
-#   Ports mappings: 7800-7899 (TCP + UDP) for dedicated rooms
+#   Ports mappings: 7800-7999 (TCP + UDP) for dedicated rooms
+# Bust: public minesweeper BR server on MINES_PUBLIC_PORT (7900).
 FROM rust:1.90-bookworm AS builder
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
