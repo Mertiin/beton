@@ -1754,6 +1754,11 @@ name = "minesweeper"
 version = "0.1.0"
 dependencies = [
  "beton",
+ "serde",
+ "serde_json",
+ "ureq",
+ "wasm-bindgen",
+ "web-sys",
 ]
 
 [[package]]

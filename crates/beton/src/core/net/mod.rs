@@ -13,7 +13,7 @@ use crate::core::platform::NetDriver;
 pub const MAX_PAYLOAD: usize = 16 * 1024;
 
 /// Maximum remote peers a host keeps. Further accepts are closed.
-pub const MAX_PEERS: usize = 8;
+pub const MAX_PEERS: usize = 50;
 
 /// Soft cap on queued inbound events before oldest messages are dropped.
 pub const MAX_INBOUND: usize = 256;

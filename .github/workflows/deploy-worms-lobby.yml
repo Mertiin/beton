@@ -9,6 +9,7 @@ on:
     paths:
       - "games/worms/**"
       - "games/worms-lobby/**"
+      - "games/minesweeper/**"
       - "crates/beton/**"
       - "deploy/worms-lobby/**"
       - "docker-compose.worms-lobby.yml"

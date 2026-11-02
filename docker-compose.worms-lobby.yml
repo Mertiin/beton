@@ -12,14 +12,15 @@ services:
     expose:
       - "8080"
     ports:
-      - "7800-7899:7800-7899/tcp"
-      - "7800-7899:7800-7899/udp"
+      - "7800-7999:7800-7999/tcp"
+      - "7800-7999:7800-7999/udp"
     environment:
       PORT: "8080"
       LOBBY_PUBLIC_HTTP: "http://127.0.0.1:8080"
       PUBLIC_WS_BASE: "${PUBLIC_WS_BASE:-wss://worms.itknegaren.com/r}"
       BETON_PUBLIC_IP: "${BETON_PUBLIC_IP:-37.27.220.29}"
       DEDICATED_BIN: "/app/bin/worms-dedicated"
+      MINES_DEDICATED_BIN: "/app/bin/minesweeper-dedicated"
       ASSETS_DIR: "/app/assets"
       PORT_MIN: "7800"
-      PORT_MAX: "7899"
+      PORT_MAX: "7999"

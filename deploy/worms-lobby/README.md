@@ -26,7 +26,8 @@ BETON_PUBLIC_IP=37.27.220.29
 ```
 
 HTTPS clients (GitHub Pages) join via Traefik → lobby `/r/{port}` WebSocket proxy → dedicated room.
-UDP `7800–7899` must still be published for WebRTC media.
+UDP/TCP `7800–7999` must still be published for WebRTC media (worms + minesweeper-dedicated rooms).
+Create body may set `"game":"minesweeper"` to spawn `minesweeper-dedicated` (`MINES_DEDICATED_BIN`).
 
 7. Deploy. Coolify builds `deploy/worms-lobby/Dockerfile` and routes HTTPS like Hotpot.
 

@@ -42,6 +42,7 @@ struct Inner {
     rooms: HashMap<String, Room>,
     public_ws_base: String,
     dedicated_bin: PathBuf,
+    mines_dedicated_bin: PathBuf,
     assets_dir: Option<PathBuf>,
     port_min: u16,
     port_max: u16,
@@ -56,6 +57,7 @@ struct Room {
     players: u32,
     max_players: u32,
     status: String,
+    game: String,
     child: Child,
     last_hb: Instant,
     created: Instant,
@@ -69,6 +71,7 @@ struct RoomInfo {
     max_players: u32,
     status: String,
     join_url: String,
+    game: String,
 }
 
 #[derive(Serialize)]
@@ -83,9 +86,15 @@ struct CreateResp {
 struct CreateReq {
     #[serde(default = "default_name")]
     name: String,
+    #[serde(default = "default_game")]
+    game: String,
 }
 
 fn default_name() -> String {
+    "worms".into()
+}
+
+fn default_game() -> String {
     "worms".into()
 }
 
@@ -102,6 +111,9 @@ async fn main() {
     let dedicated_bin = PathBuf::from(
         env::var("DEDICATED_BIN").unwrap_or_else(|_| "worms-dedicated".into()),
     );
+    let mines_dedicated_bin = PathBuf::from(
+        env::var("MINES_DEDICATED_BIN").unwrap_or_else(|_| "minesweeper-dedicated".into()),
+    );
     let assets_dir = env::var("ASSETS_DIR").ok().map(PathBuf::from);
     let port_min: u16 = env::var("PORT_MIN")
         .ok()
@@ -110,13 +122,14 @@ async fn main() {
     let port_max: u16 = env::var("PORT_MAX")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(7899);
+        .unwrap_or(7999);
 
     let app = App {
         inner: Arc::new(Mutex::new(Inner {
             rooms: HashMap::new(),
             public_ws_base: public_ws_base.trim_end_matches('/').to_string(),
             dedicated_bin,
+            mines_dedicated_bin,
             assets_dir,
             port_min,
             port_max,
@@ -214,11 +227,26 @@ async fn proxy_room_ws(client: WebSocket, port: u16) {
     }
 }
 
-async fn list_rooms(State(app): State<App>) -> Json<Vec<RoomInfo>> {
+#[derive(Deserialize, Default)]
+struct ListQuery {
+    game: Option<String>,
+}
+
+async fn list_rooms(
+    State(app): State<App>,
+    axum::extract::Query(query): axum::extract::Query<ListQuery>,
+) -> Json<Vec<RoomInfo>> {
     let inner = app.inner.lock().await;
     let mut out: Vec<_> = inner
         .rooms
         .values()
+        .filter(|r| {
+            query
+                .game
+                .as_ref()
+                .map(|g| &r.game == g)
+                .unwrap_or(true)
+        })
         .map(|r| RoomInfo {
             id: r.id.clone(),
             name: r.name.clone(),
@@ -226,6 +254,7 @@ async fn list_rooms(State(app): State<App>) -> Json<Vec<RoomInfo>> {
             max_players: r.max_players,
             status: r.status.clone(),
             join_url: join_url(&inner.public_ws_base, r.port),
+            game: r.game.clone(),
         })
         .collect();
     out.sort_by(|a, b| a.name.cmp(&b.name));
@@ -245,6 +274,7 @@ async fn get_room(
         max_players: r.max_players,
         status: r.status.clone(),
         join_url: join_url(&inner.public_ws_base, r.port),
+        game: r.game.clone(),
     }))
 }
 
@@ -253,6 +283,11 @@ async fn create_room(
     Json(req): Json<CreateReq>,
 ) -> Result<Json<CreateResp>, (StatusCode, String)> {
     let mut inner = app.inner.lock().await;
+    let game = if req.game.trim().is_empty() {
+        "worms".to_string()
+    } else {
+        req.game.trim().to_string()
+    };
     let port = next_port(&inner).ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "no free room ports".into(),
@@ -268,7 +303,14 @@ async fn create_room(
     let lobby_url = env::var("LOBBY_PUBLIC_HTTP")
         .unwrap_or_else(|_| format!("http://127.0.0.1:{}", lobby_http_port()));
 
-    let mut cmd = Command::new(&inner.dedicated_bin);
+    let bin = if game == "minesweeper" {
+        inner.mines_dedicated_bin.clone()
+    } else {
+        inner.dedicated_bin.clone()
+    };
+    let max_players = if game == "minesweeper" { 50 } else { 3 };
+
+    let mut cmd = Command::new(&bin);
     cmd.arg("--port")
         .arg(port.to_string())
         .arg("--room-id")
@@ -280,8 +322,10 @@ async fn create_room(
         .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .kill_on_drop(true);
-    if let Some(assets) = &inner.assets_dir {
-        cmd.arg("--assets").arg(assets);
+    if game != "minesweeper" {
+        if let Some(assets) = &inner.assets_dir {
+            cmd.arg("--assets").arg(assets);
+        }
     }
 
     let child = cmd.spawn().map_err(|e| {
@@ -300,15 +344,16 @@ async fn create_room(
             port,
             leader_token: leader_token.clone(),
             players: 0,
-            max_players: 3,
+            max_players,
             status: "lobby".into(),
+            game: game.clone(),
             child,
             last_hb: Instant::now(),
             created: Instant::now(),
         },
     );
 
-    eprintln!("spawned room {id} on :{port}");
+    eprintln!("spawned {game} room {id} on :{port}");
     Ok(Json(CreateResp {
         id,
         name,

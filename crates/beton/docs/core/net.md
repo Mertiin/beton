@@ -46,7 +46,7 @@ Browser ICE includes a public STUN server. Dedicated hosts can set `BETON_PUBLIC
 | Constant | Value | Rule |
 |----------|------:|------|
 | `MAX_PAYLOAD` | 16 KiB | Larger `send` / `broadcast` (and unreliable variants) fail |
-| `MAX_PEERS` | 8 | Further host accepts are closed |
+| `MAX_PEERS` | 50 | Further host accepts are closed |
 | Inbound queue | 256 payloads | Oldest `Message`/`Datagram` dropped; one `Overflow` kept |
 
 ## API on `Net`

@@ -45,7 +45,7 @@ trunk serve --release
 - **brutal-pixels** — side-view tower auto-battler. Buy modules from the bottom bar onto your tower, FIGHT for auto combat (guns + walking units). HP resets each round; loadout persists. Click a mounted module twice to sell. R restarts after a win or loss.
 - **tanks** — hotseat two-tank duel. START from the menu. Arrows/WASD move and aim (fuel-limited), 1–9 pick a weapon, hold Space to charge and release to fire. Shells dig Liero-style dirt. R rebuilds the map. Web: `cd games/tanks && trunk serve --release`.
 - **worms** — two teams of four worms, hotseat or online. START from the menu (or Enter). A/D or arrows walk, W jumps, Up/Down aim, hold Space to charge and release to fire (shotgun fires on press), 1–4 or the badge row picks a weapon, Q skips, R restarts. HOST waits for up to three joiners on port 7778; JOIN dials an address. Or `worms host [PORT]` / `worms connect HOST:PORT`. The desktop host runs the match. A browser can join (`cd games/worms && trunk serve --release`) and cannot host.
-- **minesweeper** — classic Minesweeper. LMB sweep (chord when flags match), RMB flag, R / New restart. Bottom bar: Easy/Med/Hard presets or custom width, height, and mine count. Web: `cd games/minesweeper && trunk serve --release`.
+- **minesweeper** — solo Minesweeper or online battle royale. Menu: Local / Browse / Host online (`MINES_LOBBY`, default same Coolify host as worms). BR: 3 HP, 8s move deadline (−1 HP), mine (−1 HP + board reset), clear hides a rival’s board for 6s. Authority is `minesweeper-dedicated` (lobby spawns it). Web client: `cd games/minesweeper && trunk serve --release`.
 
 Escape or the window close button exits.
 
