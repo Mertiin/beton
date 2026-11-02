@@ -1,0 +1,6 @@
+[build]
+target = "index.html"
+dist = "../../target/minesweeper-web"
+
+[watch]
+ignore = ["../../target"]
