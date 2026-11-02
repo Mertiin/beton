@@ -29,6 +29,7 @@ COPY games/worms/assets /app/assets
 
 ENV DEDICATED_BIN=/app/bin/worms-dedicated \
     MINES_DEDICATED_BIN=/app/bin/minesweeper-dedicated \
+    MINES_PUBLIC_PORT=7900 \
     ASSETS_DIR=/app/assets \
     PORT_MIN=7800 \
     PORT_MAX=7999 \

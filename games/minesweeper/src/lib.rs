@@ -10,5 +10,7 @@ pub use br_match::{
     BrMatch, DamageReason, MatchEvent, Phase, PlayerSlot, BR_H, BR_MINES, BR_W, DT, HIDE_SECS,
     MAX_SEATS, MOVE_DEADLINE_SECS, START_HP,
 };
-pub use lobby::{create_room, list_rooms, lobby_base_url, CreateRoom, RoomInfo, GAME_ID};
+pub use lobby::{
+    create_room, list_rooms, lobby_base_url, public_server, CreateRoom, RoomInfo, GAME_ID,
+};
 pub use net::*;

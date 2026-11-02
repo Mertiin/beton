@@ -165,6 +165,17 @@ impl BrMatch {
         true
     }
 
+    /// After a match ends, rebuild lobby seats from still-connected peers.
+    pub fn reset_lobby(&mut self, connected: &[PeerId]) {
+        self.seed = self.seed.wrapping_add(0x9E37_79B9);
+        self.phase = Phase::Lobby;
+        self.winner = None;
+        self.players.clear();
+        for &peer in connected {
+            let _ = self.add_player(peer);
+        }
+    }
+
     /// Apply a player action. Returns events and whether the board changed.
     pub fn apply_input(&mut self, peer: PeerId, x: i32, y: i32, action: Action) -> Vec<MatchEvent> {
         if self.phase != Phase::Playing {

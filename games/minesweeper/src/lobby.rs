@@ -53,7 +53,8 @@ pub fn list_rooms(base: &str) -> Result<Vec<RoomInfo>, String> {
         .collect())
 }
 
-/// `POST /api/rooms` with `game=minesweeper`.
+/// `POST /api/rooms` with `game=minesweeper` (legacy; prefer [`public_server`]).
+#[allow(dead_code)]
 pub fn create_room(base: &str, name: &str) -> Result<CreateRoom, String> {
     let url = format!("{}/api/rooms", trim_base(base));
     let body = CreateBody {
@@ -61,6 +62,12 @@ pub fn create_room(base: &str, name: &str) -> Result<CreateRoom, String> {
         game: GAME_ID,
     };
     http_post_json(&url, &body)
+}
+
+/// Always-on public BR server: `GET /api/minesweeper`.
+pub fn public_server(base: &str) -> Result<RoomInfo, String> {
+    let url = format!("{}/api/minesweeper", trim_base(base));
+    http_get_json(&url)
 }
 
 #[cfg(not(target_arch = "wasm32"))]

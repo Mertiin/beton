@@ -58,6 +58,8 @@ struct Room {
     max_players: u32,
     status: String,
     game: String,
+    /// Always-on public server (not reaped for empty/stale; respawned if child dies).
+    permanent: bool,
     child: Child,
     last_hb: Instant,
     created: Instant,
@@ -144,10 +146,22 @@ async fn main() {
         }
     });
 
+    {
+        let boot = app.clone();
+        tokio::spawn(async move {
+            // Give the HTTP server a moment, then ensure the public mines server.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            if let Err(e) = ensure_public_minesweeper(&boot).await {
+                eprintln!("public minesweeper: {e}");
+            }
+        });
+    }
+
     let router = Router::new()
         .route("/api/rooms", get(list_rooms).post(create_room))
         .route("/api/rooms/{id}", get(get_room))
         .route("/api/rooms/{id}/heartbeat", post(heartbeat))
+        .route("/api/minesweeper", get(public_minesweeper))
         .route("/r/{port}", get(room_ws))
         .layer(CorsLayer::permissive())
         .with_state(app);
@@ -156,6 +170,143 @@ async fn main() {
     eprintln!("worms-lobby listening on http://{addr}");
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     axum::serve(listener, router).await.expect("serve");
+}
+
+const PUBLIC_MINES_ID: &str = "mines-public";
+
+fn mines_public_port() -> u16 {
+    env::var("MINES_PUBLIC_PORT")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(7900)
+}
+
+async fn ensure_public_minesweeper(app: &App) -> Result<(), String> {
+    let mut inner = app.inner.lock().await;
+    if inner.rooms.contains_key(PUBLIC_MINES_ID) {
+        return Ok(());
+    }
+    let port = mines_public_port();
+    if !(inner.port_min..=inner.port_max).contains(&port) {
+        return Err(format!(
+            "MINES_PUBLIC_PORT {port} outside {}-{}",
+            inner.port_min, inner.port_max
+        ));
+    }
+    if inner.rooms.values().any(|r| r.port == port) {
+        return Err(format!("port {port} already in use"));
+    }
+    spawn_room_locked(
+        &mut inner,
+        PUBLIC_MINES_ID.to_string(),
+        "Minesweeper BR".into(),
+        "minesweeper".into(),
+        port,
+        true,
+        50,
+    )?;
+    eprintln!("public minesweeper on :{port}");
+    Ok(())
+}
+
+async fn public_minesweeper(State(app): State<App>) -> Result<Json<RoomInfo>, StatusCode> {
+    {
+        let inner = app.inner.lock().await;
+        if let Some(r) = inner.rooms.get(PUBLIC_MINES_ID) {
+            return Ok(Json(RoomInfo {
+                id: r.id.clone(),
+                name: r.name.clone(),
+                players: r.players,
+                max_players: r.max_players,
+                status: r.status.clone(),
+                join_url: join_url(&inner.public_ws_base, r.port),
+                game: r.game.clone(),
+            }));
+        }
+    }
+    ensure_public_minesweeper(&app)
+        .await
+        .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let inner = app.inner.lock().await;
+    let r = inner
+        .rooms
+        .get(PUBLIC_MINES_ID)
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
+    Ok(Json(RoomInfo {
+        id: r.id.clone(),
+        name: r.name.clone(),
+        players: r.players,
+        max_players: r.max_players,
+        status: r.status.clone(),
+        join_url: join_url(&inner.public_ws_base, r.port),
+        game: r.game.clone(),
+    }))
+}
+
+fn spawn_room_locked(
+    inner: &mut Inner,
+    id: String,
+    name: String,
+    game: String,
+    port: u16,
+    permanent: bool,
+    max_players: u32,
+) -> Result<(String, String), String> {
+    let lobby_url = env::var("LOBBY_PUBLIC_HTTP")
+        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", lobby_http_port()));
+    let leader_token = if permanent {
+        String::new()
+    } else {
+        Uuid::new_v4().to_string()
+    };
+
+    let bin = if game == "minesweeper" {
+        inner.mines_dedicated_bin.clone()
+    } else {
+        inner.dedicated_bin.clone()
+    };
+
+    let mut cmd = Command::new(&bin);
+    cmd.arg("--port")
+        .arg(port.to_string())
+        .arg("--room-id")
+        .arg(&id)
+        .arg("--leader-token")
+        .arg(&leader_token)
+        .arg("--lobby")
+        .arg(&lobby_url)
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .kill_on_drop(true);
+    if game == "minesweeper" {
+        cmd.arg("--persistent");
+    } else if let Some(assets) = &inner.assets_dir {
+        cmd.arg("--assets").arg(assets);
+    }
+
+    let child = cmd
+        .spawn()
+        .map_err(|e| format!("spawn dedicated: {e}"))?;
+
+    let join = join_url(&inner.public_ws_base, port);
+    inner.rooms.insert(
+        id.clone(),
+        Room {
+            id: id.clone(),
+            name,
+            port,
+            leader_token: leader_token.clone(),
+            players: 0,
+            max_players,
+            status: "lobby".into(),
+            game,
+            permanent,
+            child,
+            last_hb: Instant::now(),
+            created: Instant::now(),
+        },
+    );
+    Ok((join, leader_token))
 }
 
 fn join_url(base: &str, port: u16) -> String {
@@ -288,70 +439,41 @@ async fn create_room(
     } else {
         req.game.trim().to_string()
     };
+    // Minesweeper uses the always-on public server — don't spawn player-hosted rooms.
+    if game == "minesweeper" {
+        drop(inner);
+        let info = public_minesweeper(State(app))
+            .await
+            .map_err(|s| (s, "public minesweeper unavailable".into()))?;
+        let info = info.0;
+        return Ok(Json(CreateResp {
+            id: info.id,
+            name: info.name,
+            join_url: info.join_url,
+            leader_token: String::new(),
+        }));
+    }
     let port = next_port(&inner).ok_or((
         StatusCode::SERVICE_UNAVAILABLE,
         "no free room ports".into(),
     ))?;
     let id = Uuid::new_v4().to_string();
-    let leader_token = Uuid::new_v4().to_string();
     let name = if req.name.trim().is_empty() {
         format!("room-{}", &id[..8])
     } else {
         req.name.trim().to_string()
     };
-
-    let lobby_url = env::var("LOBBY_PUBLIC_HTTP")
-        .unwrap_or_else(|_| format!("http://127.0.0.1:{}", lobby_http_port()));
-
-    let bin = if game == "minesweeper" {
-        inner.mines_dedicated_bin.clone()
-    } else {
-        inner.dedicated_bin.clone()
-    };
-    let max_players = if game == "minesweeper" { 50 } else { 3 };
-
-    let mut cmd = Command::new(&bin);
-    cmd.arg("--port")
-        .arg(port.to_string())
-        .arg("--room-id")
-        .arg(&id)
-        .arg("--leader-token")
-        .arg(&leader_token)
-        .arg("--lobby")
-        .arg(&lobby_url)
-        .stdout(Stdio::null())
-        .stderr(Stdio::inherit())
-        .kill_on_drop(true);
-    if game != "minesweeper" {
-        if let Some(assets) = &inner.assets_dir {
-            cmd.arg("--assets").arg(assets);
-        }
-    }
-
-    let child = cmd.spawn().map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("spawn dedicated: {e}"),
-        )
-    })?;
-
-    let join = join_url(&inner.public_ws_base, port);
-    inner.rooms.insert(
+    let max_players = 3u32;
+    let (join, leader_token) = spawn_room_locked(
+        &mut inner,
         id.clone(),
-        Room {
-            id: id.clone(),
-            name: name.clone(),
-            port,
-            leader_token: leader_token.clone(),
-            players: 0,
-            max_players,
-            status: "lobby".into(),
-            game: game.clone(),
-            child,
-            last_hb: Instant::now(),
-            created: Instant::now(),
-        },
-    );
+        name.clone(),
+        game.clone(),
+        port,
+        false,
+        max_players,
+    )
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
 
     eprintln!("spawned {game} room {id} on :{port}");
     Ok(Json(CreateResp {
@@ -391,22 +513,44 @@ fn lobby_http_port() -> u16 {
 }
 
 async fn reap(app: &App) {
-    let mut inner = app.inner.lock().await;
+    let mut to_respawn: Vec<(String, String, String, u16, u32)> = Vec::new();
     let mut dead = Vec::new();
-    for (id, room) in inner.rooms.iter_mut() {
-        let stale = room.last_hb.elapsed() > Duration::from_secs(15)
-            && room.created.elapsed() > Duration::from_secs(20);
-        // Drop unused rooms quickly so ports recycle (create-spam / abandoned host).
-        let empty = room.players == 0 && room.created.elapsed() > Duration::from_secs(30);
-        let exited = room.child.try_wait().ok().flatten().is_some();
-        if stale || empty || exited {
-            let _ = room.child.start_kill();
-            dead.push(id.clone());
+    {
+        let mut inner = app.inner.lock().await;
+        for (id, room) in inner.rooms.iter_mut() {
+            let exited = room.child.try_wait().ok().flatten().is_some();
+            if room.permanent {
+                if exited {
+                    eprintln!("public room {id} exited — respawning");
+                    to_respawn.push((
+                        room.id.clone(),
+                        room.name.clone(),
+                        room.game.clone(),
+                        room.port,
+                        room.max_players,
+                    ));
+                    dead.push(id.clone());
+                }
+                continue;
+            }
+            let stale = room.last_hb.elapsed() > Duration::from_secs(15)
+                && room.created.elapsed() > Duration::from_secs(20);
+            let empty = room.players == 0 && room.created.elapsed() > Duration::from_secs(30);
+            if stale || empty || exited {
+                let _ = room.child.start_kill();
+                dead.push(id.clone());
+            }
+        }
+        for id in &dead {
+            eprintln!("reaping room {id}");
+            inner.rooms.remove(id);
         }
     }
-    for id in dead {
-        eprintln!("reaping room {id}");
-        inner.rooms.remove(&id);
+    for (id, name, game, port, max_players) in to_respawn {
+        let mut inner = app.inner.lock().await;
+        if let Err(e) = spawn_room_locked(&mut inner, id, name, game, port, true, max_players) {
+            eprintln!("respawn failed: {e}");
+        }
     }
 }
 

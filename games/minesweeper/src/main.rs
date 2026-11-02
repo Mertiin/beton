@@ -9,9 +9,9 @@ use beton::{
     Sprite, TextureHandle, UiId, Vec3,
 };
 use minesweeper::{
-    cells_to_views, create_room, decode_board, decode_event, decode_go, decode_snap, decode_welcome,
-    encode_hello, encode_input, list_rooms, lobby_base_url, Action, Board, BoardMsg, CellView,
-    InputMsg, MatchEvent, RoomInfo, SeatSnap, Snap, Welcome, BR_H, BR_W,
+    cells_to_views, decode_board, decode_event, decode_go, decode_snap, decode_welcome,
+    encode_hello, encode_input, lobby_base_url, public_server, Action, Board, BoardMsg, CellView,
+    InputMsg, MatchEvent, SeatSnap, Snap, Welcome, BR_H, BR_W,
 };
 
 const ASSETS: &[&str] = &["assets/Roboto-Regular.ttf"];
@@ -53,19 +53,15 @@ const UI_NEW: UiId = UiId(50);
 const UI_NEW_L: UiId = UiId(51);
 const UI_LOCAL: UiId = UiId(60);
 const UI_LOCAL_L: UiId = UiId(61);
-const UI_BROWSE: UiId = UiId(62);
-const UI_BROWSE_L: UiId = UiId(63);
-const UI_HOST_ON: UiId = UiId(64);
-const UI_HOST_ON_L: UiId = UiId(65);
+const UI_JOIN: UiId = UiId(62);
+const UI_JOIN_L: UiId = UiId(63);
 const UI_BACK: UiId = UiId(66);
 const UI_BACK_L: UiId = UiId(67);
-const UI_ROOM0: UiId = UiId(100);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Screen {
     Menu,
     Local,
-    Browse,
     Online,
 }
 
@@ -129,7 +125,6 @@ struct MinesweeperGame {
     rmb_was: bool,
     screen: Screen,
     lobby_url: String,
-    rooms: Vec<RoomInfo>,
     online: Option<OnlineState>,
     status: String,
 }
@@ -148,7 +143,6 @@ impl MinesweeperGame {
             rmb_was: false,
             screen: Screen::Menu,
             lobby_url: lobby_base_url(),
-            rooms: Vec::new(),
             online: None,
             status: String::new(),
         }
@@ -179,24 +173,11 @@ impl MinesweeperGame {
         self.apply_config();
     }
 
-    fn refresh_rooms(&mut self) {
-        match list_rooms(&self.lobby_url) {
-            Ok(rooms) => {
-                self.rooms = rooms;
-                self.status = format!("{} rooms", self.rooms.len());
-            }
-            Err(e) => {
-                self.rooms.clear();
-                self.status = e;
-            }
-        }
-    }
-
-    fn host_online(&mut self, ctx: &mut Context) {
-        match create_room(&self.lobby_url, "mines-br") {
+    fn join_server(&mut self, ctx: &mut Context) {
+        match public_server(&self.lobby_url) {
             Ok(room) => {
-                self.status = format!("hosting {}", room.id);
-                self.begin_online(ctx, room.join_url, room.leader_token);
+                self.status = format!("joining {}…", room.name);
+                self.begin_online(ctx, room.join_url, String::new());
             }
             Err(e) => self.status = e,
         }
@@ -325,8 +306,7 @@ impl MinesweeperGame {
             || ctx.ui.hovered(UI_M_INC)
             || ctx.ui.hovered(UI_BACK)
             || ctx.ui.hovered(UI_LOCAL)
-            || ctx.ui.hovered(UI_BROWSE)
-            || ctx.ui.hovered(UI_HOST_ON)
+            || ctx.ui.hovered(UI_JOIN)
     }
 
     fn handle_net(&mut self, ctx: &mut Context) {
@@ -529,8 +509,7 @@ impl MinesweeperGame {
         let ui_font = self.ui_font.as_ref().expect("boot");
         let [fb_w, fb_h] = ctx.fb_size;
         let local_hot = ctx.ui.hovered(UI_LOCAL) || ctx.ui.hovered(UI_LOCAL_L);
-        let browse_hot = ctx.ui.hovered(UI_BROWSE) || ctx.ui.hovered(UI_BROWSE_L);
-        let host_hot = ctx.ui.hovered(UI_HOST_ON) || ctx.ui.hovered(UI_HOST_ON_L);
+        let join_hot = ctx.ui.hovered(UI_JOIN) || ctx.ui.hovered(UI_JOIN_L);
         ctx.ui.node(
             UI_ROOT,
             style!(
@@ -553,65 +532,8 @@ impl MinesweeperGame {
                     style!(color: [0.95, 0.96, 0.98, 1.0]),
                     "Minesweeper BR",
                 );
+                menu_btn(ui, ui_font, UI_JOIN, UI_JOIN_L, "JOIN SERVER", join_hot);
                 menu_btn(ui, ui_font, UI_LOCAL, UI_LOCAL_L, "LOCAL", local_hot);
-                menu_btn(ui, ui_font, UI_BROWSE, UI_BROWSE_L, "BROWSE", browse_hot);
-                menu_btn(
-                    ui,
-                    ui_font,
-                    UI_HOST_ON,
-                    UI_HOST_ON_L,
-                    "HOST ONLINE",
-                    host_hot,
-                );
-                if !self.status.is_empty() {
-                    ui.text(
-                        UiId(0),
-                        ui_font,
-                        [0.0, 14.0],
-                        style!(color: [0.75, 0.78, 0.85, 1.0]),
-                        &self.status,
-                    );
-                }
-            },
-        );
-    }
-
-    fn draw_browse(&mut self, ctx: &mut Context) {
-        let ui_font = self.ui_font.as_ref().expect("boot");
-        let [fb_w, fb_h] = ctx.fb_size;
-        let back_hot = ctx.ui.hovered(UI_BACK) || ctx.ui.hovered(UI_BACK_L);
-        ctx.ui.node(
-            UI_ROOT,
-            style!(
-                position: absolute,
-                width: (fb_w) pt,
-                height: (fb_h) pt,
-                top: 0 pt,
-                left: 0 pt,
-                flex_direction: column,
-                padding: 16 pt,
-                gap: 8 pt,
-                background: Some([0.10, 0.11, 0.14, 0.96]),
-            ),
-            |ui| {
-                ui.text(
-                    UiId(0),
-                    ui_font,
-                    [0.0, 22.0],
-                    style!(color: [0.95, 0.96, 0.98, 1.0]),
-                    "Browse rooms",
-                );
-                for (i, room) in self.rooms.iter().take(8).enumerate() {
-                    let id = UiId(UI_ROOM0.0 + i as u32);
-                    let lid = UiId(UI_ROOM0.0 + 50 + i as u32);
-                    let hot = ui.hovered(id) || ui.hovered(lid);
-                    let label = format!(
-                        "{}  {}/{}  {}",
-                        room.name, room.players, room.max_players, room.status
-                    );
-                    menu_btn(ui, ui_font, id, lid, &label, hot);
-                }
-                menu_btn(ui, ui_font, UI_BACK, UI_BACK_L, "BACK", back_hot);
                 if !self.status.is_empty() {
                     ui.text(
                         UiId(0),
@@ -947,28 +869,10 @@ impl Game for MinesweeperGame {
         match self.screen {
             Screen::Menu => {
                 self.draw_menu(ctx);
-                if ctx.ui.clicked(UI_LOCAL) || ctx.ui.clicked(UI_LOCAL_L) {
+                if ctx.ui.clicked(UI_JOIN) || ctx.ui.clicked(UI_JOIN_L) {
+                    self.join_server(ctx);
+                } else if ctx.ui.clicked(UI_LOCAL) || ctx.ui.clicked(UI_LOCAL_L) {
                     self.screen = Screen::Local;
-                } else if ctx.ui.clicked(UI_BROWSE) || ctx.ui.clicked(UI_BROWSE_L) {
-                    self.refresh_rooms();
-                    self.screen = Screen::Browse;
-                } else if ctx.ui.clicked(UI_HOST_ON) || ctx.ui.clicked(UI_HOST_ON_L) {
-                    self.host_online(ctx);
-                }
-            }
-            Screen::Browse => {
-                self.draw_browse(ctx);
-                if ctx.ui.clicked(UI_BACK) || ctx.ui.clicked(UI_BACK_L) {
-                    self.screen = Screen::Menu;
-                }
-                for (i, room) in self.rooms.iter().enumerate().take(8) {
-                    let id = UiId(UI_ROOM0.0 + i as u32);
-                    let lid = UiId(UI_ROOM0.0 + 50 + i as u32);
-                    if ctx.ui.clicked(id) || ctx.ui.clicked(lid) {
-                        let url = room.join_url.clone();
-                        self.begin_online(ctx, url, String::new());
-                        break;
-                    }
                 }
             }
             Screen::Local => {

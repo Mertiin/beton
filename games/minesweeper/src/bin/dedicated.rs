@@ -1,10 +1,11 @@
-//! Headless authoritative minesweeper BR host for one lobby room.
+//! Headless authoritative minesweeper BR host (public persistent server).
 //!
-//! Open join: anyone who connects is seated. When 2+ players are waiting, a
-//! countdown starts and the match begins automatically.
+//! Open join: anyone who connects is seated while the room is in lobby.
+//! When 2+ players wait, a countdown starts and the match begins.
+//! After a match, the room returns to lobby for the next round.
 //!
 //! ```text
-//! minesweeper-dedicated --port 7901 --room-id abc --leader-token tok --lobby http://127.0.0.1:8080
+//! minesweeper-dedicated --port 7900 --room-id mines-public --persistent --lobby http://127.0.0.1:8080
 //! ```
 
 use std::env;
@@ -19,6 +20,8 @@ use minesweeper::{
 
 /// Seconds after the 2nd player joins before the match starts.
 const AUTO_START_SECS: f32 = 10.0;
+/// Seconds to show results before returning to lobby.
+const ROUND_END_SECS: f32 = 5.0;
 
 fn main() {
     if let Err(err) = run() {
@@ -30,13 +33,17 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<String> = env::args().collect();
     let port = flag_u16(&args, "--port").unwrap_or(7900);
-    let room_id = flag_str(&args, "--room-id").unwrap_or_else(|| "local".into());
+    let room_id = flag_str(&args, "--room-id").unwrap_or_else(|| "mines-public".into());
     let _leader_token = flag_str(&args, "--leader-token").unwrap_or_default();
     let lobby = flag_str(&args, "--lobby").unwrap_or_else(|| "http://127.0.0.1:8080".into());
+    let persistent = args.iter().any(|a| a == "--persistent")
+        || env::var("MINES_PERSISTENT").map(|v| v == "1" || v.eq_ignore_ascii_case("true")).unwrap_or(true);
 
     let mut net = Net::new();
     net.host(port)?;
-    eprintln!("dedicated listening :{port} room={room_id} (open join, auto-start {AUTO_START_SECS}s)");
+    eprintln!(
+        "dedicated listening :{port} room={room_id} persistent={persistent} (open join, auto-start {AUTO_START_SECS}s)"
+    );
 
     let mut seats: Vec<PeerId> = Vec::new();
     let mut pending_hello: Vec<PeerId> = Vec::new();
@@ -44,6 +51,7 @@ fn run() -> Result<(), String> {
     let mut seed: u64 = 0x41_4e_53_57;
     let mut snap_acc = 0.0f32;
     let mut lobby_countdown: Option<f32> = None;
+    let mut over_acc = 0.0f32;
     let mut last_hb = Instant::now() - Duration::from_secs(10);
     let mut empty_since: Option<Instant> = Some(Instant::now());
     let tick = Duration::from_secs_f32(DT);
@@ -62,7 +70,6 @@ fn run() -> Result<(), String> {
                         continue;
                     }
                     empty_since = None;
-                    // Open join: seat immediately (HELLO optional).
                     welcome_peer(
                         &mut net,
                         &mut seats,
@@ -79,19 +86,23 @@ fn run() -> Result<(), String> {
                         for ev in m.remove_peer(id) {
                             let _ = net.broadcast(&encode_event(&ev));
                         }
+                        if m.phase == Phase::Lobby {
+                            // Drop seat from lobby roster.
+                            m.players.retain(|p| p.peer != id);
+                        }
                     }
                     if seats.len() < 2 {
                         lobby_countdown = None;
                     }
                     if seats.is_empty() {
                         empty_since = Some(Instant::now());
-                        // Reset lobby match shell so the next pair starts fresh.
                         if match_state
                             .as_ref()
                             .map(|m| m.phase != Phase::Playing)
                             .unwrap_or(true)
                         {
                             match_state = None;
+                            over_acc = 0.0;
                         }
                     }
                 }
@@ -102,7 +113,6 @@ fn run() -> Result<(), String> {
                     match tag {
                         TAG_HELLO => {
                             let _ = decode_hello(&bytes);
-                            // Already seated on PeerJoined; HELLO is a no-op ack.
                             if seats.iter().all(|&s| s != from) {
                                 welcome_peer(
                                     &mut net,
@@ -142,11 +152,9 @@ fn run() -> Result<(), String> {
             }
         }
 
-        // Auto-start countdown when 2+ players wait in lobby.
-        let in_lobby = match_state
-            .as_ref()
-            .map(|m| m.phase == Phase::Lobby)
-            .unwrap_or(true);
+        let phase = match_state.as_ref().map(|m| m.phase);
+        let in_lobby = phase == Some(Phase::Lobby) || phase.is_none();
+
         if in_lobby && seats.len() >= 2 {
             let rem = lobby_countdown.get_or_insert(AUTO_START_SECS);
             *rem -= DT;
@@ -159,9 +167,28 @@ fn run() -> Result<(), String> {
                     &mut seed,
                     &mut snap_acc,
                 );
+                over_acc = 0.0;
             }
         } else if in_lobby {
             lobby_countdown = None;
+        }
+
+        // End-of-round → back to lobby for the next match.
+        if phase == Some(Phase::Over) {
+            over_acc += DT;
+            if over_acc >= ROUND_END_SECS {
+                over_acc = 0.0;
+                lobby_countdown = None;
+                if let Some(m) = match_state.as_mut() {
+                    m.reset_lobby(&seats);
+                    for p in &mut m.players {
+                        let payload = encode_board_from_player(p);
+                        p.board_dirty = false;
+                        let _ = net.send(p.peer, &payload);
+                    }
+                    eprintln!("round reset → lobby players={}", seats.len());
+                }
+            }
         }
 
         let countdown_ms = lobby_countdown
@@ -189,8 +216,7 @@ fn run() -> Result<(), String> {
                 let snap = Snap::from_match_with_countdown(state, countdown_ms);
                 let _ = net.broadcast_unreliable(&encode_snap(&snap));
             }
-        } else if seats.len() >= 1 {
-            // Thin lobby snap before BrMatch exists: create shell for roster.
+        } else if !seats.is_empty() {
             let m = match_state.get_or_insert_with(|| BrMatch::new(seed));
             for &id in &seats {
                 let _ = m.add_player(id);
@@ -215,10 +241,12 @@ fn run() -> Result<(), String> {
             let _ = heartbeat(&lobby, &room_id, seats.len() as u32, status);
         }
 
-        if let Some(since) = empty_since {
-            if since.elapsed() > Duration::from_secs(30) {
-                eprintln!("empty room timeout — exiting");
-                break;
+        if !persistent {
+            if let Some(since) = empty_since {
+                if since.elapsed() > Duration::from_secs(30) {
+                    eprintln!("empty room timeout — exiting");
+                    break;
+                }
             }
         }
 
@@ -243,10 +271,11 @@ fn welcome_peer(
         pending.retain(|&p| p != id);
         return;
     }
-    // Late join during playing/over: reject (wait for next room).
+    // Join only while waiting for the next round (lobby). Mid-match wait for reset.
     if let Some(m) = match_state.as_ref() {
         if m.phase != Phase::Lobby {
             pending.retain(|&p| p != id);
+            eprintln!("peer {} deferred — match in progress", id.0);
             return;
         }
     }
@@ -260,7 +289,6 @@ fn welcome_peer(
         return;
     };
 
-    // No leader gate — everyone is a normal seat.
     let welcome = default_welcome(id, seat, false);
     let _ = net.send(id, &encode_welcome(&welcome));
     if let Some(p) = m.player_by_seat(seat) {
