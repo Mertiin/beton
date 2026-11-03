@@ -863,6 +863,13 @@ impl Game for MinesweeperGame {
                 far: 100.0,
             },
         };
+        // Smoke / CI: `MINES_AUTO_JOIN=1` connects to the public server on boot.
+        if std::env::var("MINES_AUTO_JOIN")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            self.join_server(ctx);
+        }
     }
 
     fn update(&mut self, ctx: &mut Context) {
