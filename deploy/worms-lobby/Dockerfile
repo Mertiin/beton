@@ -5,7 +5,10 @@
 #   Port: 8080
 #   Ports mappings: 7800-7999 (TCP + UDP) for dedicated rooms
 # Bust: public minesweeper BR server on MINES_PUBLIC_PORT (7900).
+# CACHEBUST forces Coolify/Docker to rebuild binaries even when layers look warm.
+ARG CACHEBUST=2026-11-03-mines-api
 FROM rust:1.90-bookworm AS builder
+ARG CACHEBUST
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         pkg-config libasound2-dev libssl-dev \
@@ -14,7 +17,8 @@ WORKDIR /src
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
 COPY games ./games
-RUN cargo build -p worms-lobby --release -j 2 \
+RUN echo "cachebust=${CACHEBUST}" \
+    && cargo build -p worms-lobby --release -j 2 \
     && cargo build -p worms --bin worms-dedicated --release -j 2 \
     && cargo build -p minesweeper --bin minesweeper-dedicated --release -j 2
 

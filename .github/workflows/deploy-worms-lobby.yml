@@ -23,13 +23,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to Coolify
+        env:
+          COOLIFY_TOKEN: ${{ secrets.COOLIFY_TOKEN }}
+          COOLIFY_WORMS_WEBHOOK: ${{ secrets.COOLIFY_WORMS_WEBHOOK }}
         run: |
-          if [ -z "${{ secrets.COOLIFY_WORMS_WEBHOOK }}" ] || [ -z "${{ secrets.COOLIFY_TOKEN }}" ]; then
-            echo "::warning::COOLIFY_WORMS_WEBHOOK / COOLIFY_TOKEN not set — skip deploy"
-            exit 0
+          # Prefer explicit webhook secret; fall back to known worms-lobby app UUID.
+          WEBHOOK="${COOLIFY_WORMS_WEBHOOK:-https://ci.itknegaren.com/api/v1/deploy?uuid=u7myxjhp11ya96va0iqbrneh&force=true}"
+          if [ -z "${COOLIFY_TOKEN}" ]; then
+            echo "::error::COOLIFY_TOKEN not set — cannot deploy (Coolify Keys & Tokens → API token with deploy)"
+            exit 1
           fi
-          status=$(curl -s --request POST "${{ secrets.COOLIFY_WORMS_WEBHOOK }}" \
-            --header "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+          status=$(curl -s --request POST "${WEBHOOK}" \
+            --header "Authorization: Bearer ${COOLIFY_TOKEN}" \
             --output response.txt --write-out '%{http_code}')
           echo "Coolify responded with HTTP $status"
           cat response.txt
